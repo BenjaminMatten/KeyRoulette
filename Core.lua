@@ -27,6 +27,18 @@ SafeRegisterEvent("PLAYER_ENTERING_WORLD")
 SafeRegisterEvent("GROUP_ROSTER_UPDATE")
 SafeRegisterEvent("BAG_UPDATE_DELAYED")
 SafeRegisterEvent("CHAT_MSG_ADDON")
+SafeRegisterEvent("CHAT_MSG_PARTY")
+SafeRegisterEvent("CHAT_MSG_PARTY_LEADER")
+SafeRegisterEvent("CHAT_MSG_RAID")
+SafeRegisterEvent("CHAT_MSG_RAID_LEADER")
+
+-- Register Popular Addon Channel Prefixes
+local function RegisterAddonPrefixes()
+    local prefixes = { "KeyRoulette", "AstralKeys", "Details", "LibOpenRaid", "MythicKeystones" }
+    for _, p in ipairs(prefixes) do
+        pcall(C_ChatInfo.RegisterAddonMessagePrefix, p)
+    end
+end
 
 -- Class Colors Helper
 function KR:GetPlayerClassColor()
@@ -209,13 +221,13 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             if KeyRouletteDB.showMinimap == nil then KeyRouletteDB.showMinimap = true end
             KeyRouletteDB.customFormat = KeyRouletteDB.customFormat or "🎲 Key Roulette picked: %s's +%d %s!"
 
-            pcall(C_ChatInfo.RegisterAddonMessagePrefix, "KeyRoulette")
+            RegisterAddonPrefixes()
             KR:ScanPlayerKeystone()
             KR:UpdateGroupRoster()
         end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
-        pcall(C_ChatInfo.RegisterAddonMessagePrefix, "KeyRoulette")
+        RegisterAddonPrefixes()
         KR:BroadcastKeystone()
         KR:UpdateGroupRoster()
         if DEFAULT_CHAT_FRAME then
@@ -227,16 +239,38 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
         KR:RequestGroupKeystones()
         KR:UpdateGroupRoster()
 
-    elseif event == "BAG_UPDATE_DELAYED" or event == "CHALLENGE_MODE_KEYSTONE_RECEPTACLE_OPEN" then
+    elseif event == "BAG_UPDATE_DELAYED" then
         KR:ScanPlayerKeystone()
         KR:BroadcastKeystone()
         KR:UpdateGroupRoster()
 
+    elseif event:sub(1, 8) == "CHAT_MSG" and event ~= "CHAT_MSG_ADDON" then
+        -- Party Chat Keystone Link Auto-Parser!
+        local text, sender = ...
+        if text and text:find("keystone:") then
+            local senderName = (Ambiguate and Ambiguate(sender, "none")) or sender:match("([^-]+)") or sender
+            local mapID, level = text:match("keystone:%d+:(%d+):(%d+)")
+            if mapID and level then
+                mapID = tonumber(mapID)
+                level = tonumber(level)
+                local dungeon = KR:GetDungeonInfo(mapID)
+
+                KR.groupMembers[senderName] = {
+                    mapID = mapID,
+                    level = level,
+                    dungeonName = (dungeon and dungeon.name) or ("Map " .. mapID),
+                    icon = dungeon and dungeon.icon or 5254320,
+                    source = "Chat Link"
+                }
+                KR:UpdateGroupRoster()
+            end
+        end
+
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, message, channel, sender = ...
-        if prefix == "KeyRoulette" then
-            local senderName = (Ambiguate and Ambiguate(sender, "none")) or sender:match("([^-]+)") or sender
+        local senderName = (Ambiguate and Ambiguate(sender, "none")) or sender:match("([^-]+)") or sender
 
+        if prefix == "KeyRoulette" then
             if message == "PING" then
                 KR:BroadcastKeystone()
             elseif message:sub(1, 4) == "KEY:" then
@@ -254,6 +288,26 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                         source = "Synced"
                     }
                     KR:UpdateGroupRoster()
+                end
+            end
+        elseif prefix == "AstralKeys" or prefix == "Details" or prefix == "LibOpenRaid" or prefix == "MythicKeystones" then
+            -- Cross-addon message parsing
+            if message and message:find("(%d+):(%d+)") then
+                local mID, lvl = message:match("(%d+):(%d+)")
+                if mID and lvl then
+                    mID = tonumber(mID)
+                    lvl = tonumber(lvl)
+                    if mID > 100 and lvl > 1 then
+                        local dungeon = KR:GetDungeonInfo(mID)
+                        KR.groupMembers[senderName] = {
+                            mapID = mID,
+                            level = lvl,
+                            dungeonName = dungeon and dungeon.name or ("Map " .. mID),
+                            icon = dungeon and dungeon.icon or 5254320,
+                            source = "Addon Sync"
+                        }
+                        KR:UpdateGroupRoster()
+                    end
                 end
             end
         end
