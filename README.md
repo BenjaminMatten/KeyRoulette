@@ -4,7 +4,7 @@ Mythic+ AddOn for World of Warcraft to help choose a key
 =======
 # Key Roulette (World of Warcraft Addon)
 
-**Key Roulette** is a sleek, modern World of Warcraft addon inspired by **EllesmereUI**. It automatically reads the Mythic+ Keystones of your party members, displays them in a clean dark UI accented by your active character's **class color**, and lets you pick a random key with an interactive roulette wheel animation and output the winning key directly to party chat!
+**Key Roulette** is a sleek, modern World of Warcraft addon (compatible with Midnight 12.1.0 and 11.x) inspired by **EllesmereUI**. It automatically reads the Mythic+ Keystones of your party members, displays them in a clean dark UI accented by your active character's **class color**, and lets you pick a random key with an interactive roulette wheel animation and output the winning key directly to party chat!
 
 ---
 
