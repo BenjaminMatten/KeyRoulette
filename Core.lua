@@ -27,6 +27,8 @@ SafeRegisterEvent("ADDON_LOADED")
 SafeRegisterEvent("PLAYER_ENTERING_WORLD")
 SafeRegisterEvent("GROUP_ROSTER_UPDATE")
 SafeRegisterEvent("BAG_UPDATE_DELAYED")
+SafeRegisterEvent("PLAYER_REGEN_DISABLED")
+SafeRegisterEvent("PLAYER_REGEN_ENABLED")
 SafeRegisterEvent("CHAT_MSG_ADDON")
 SafeRegisterEvent("CHAT_MSG_PARTY")
 SafeRegisterEvent("CHAT_MSG_PARTY_LEADER")
@@ -194,8 +196,8 @@ local function DeepSearchTable(tbl, searchNames, depth)
     return nil, nil
 end
 
--- Comprehensive Keystone Lookup Engine
-function KR:FindPartyMemberKey(unit, name)
+-- Comprehensive Keystone Lookup Engine (Ultra-Fast Direct Lookups)
+function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
     if not name then return nil end
     local shortName = name:match("([^-]+)") or name
     local realm = GetNormalizedRealmName() or GetRealmName() or ""
@@ -221,20 +223,42 @@ function KR:FindPartyMemberKey(unit, name)
             return saved
         end
     end
-    -- 4. Check EllesmereUIDB.keystonePopup / EllesmereUI / EUIKeysPopup
+
+    -- 4. Check EllesmereUIDB.keystonePopup / EllesmereUI (Fast Direct Table Indexing)
     if _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys then
         pcall(function()
-            local eui = _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys
-            if _G.EllesmereUIDB and _G.EllesmereUIDB.keystonePopup then
-                local mID, lvl = DeepSearchTable(_G.EllesmereUIDB.keystonePopup, searchNames, 0)
-                if mID and lvl then
-                    KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
+            local kp = (_G.EllesmereUIDB and _G.EllesmereUIDB.keystonePopup) or _G.EUIKeysPopup or _G.EllesmereUI
+            if type(kp) == "table" then
+                for _, sName in ipairs(searchNames) do
+                    if sName then
+                        local entry = kp[sName] or kp[sName:lower()]
+                        if entry then
+                            local mID, lvl = ExtractMapAndLevel(entry)
+                            if mID and lvl then
+                                KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
+                                break
+                            end
+                        end
+                    end
                 end
-            end
-            if not KR.groupMembers[name] and eui then
-                local mID, lvl = DeepSearchTable(eui, searchNames, 0)
-                if mID and lvl then
-                    KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
+                -- Shallow 1-level scan if stored as an array of player objects
+                if not KR.groupMembers[name] then
+                    for k, v in pairs(kp) do
+                        if type(v) == "table" then
+                            local sender = v.name or v.sender or v.player or (type(k) == "string" and k)
+                            if type(sender) == "string" then
+                                for _, sName in ipairs(searchNames) do
+                                    if sName and (sender == sName or sender:lower() == sName:lower() or sender:find(sName, 1, true)) then
+                                        local mID, lvl = ExtractMapAndLevel(v)
+                                        if mID and lvl then
+                                            KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
             end
         end)
@@ -243,7 +267,7 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 5. Check LibOpenRaid (Queries unit, guid, shortName, fullName)
+    -- 5. Check LibOpenRaid (Fast direct API methods)
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor then
         pcall(function()
@@ -257,16 +281,13 @@ function KR:FindPartyMemberKey(unit, name)
             if not r1 and lor.GetPlayerKeystone then
                 r1, r2 = lor:GetPlayerKeystone(unit)
                 if not r1 and guid then r1, r2 = lor:GetPlayerKeystone(guid) end
-                if not r1 then r1, r2 = lor:GetPlayerKeystone(shortName) end
             end
-            if not r1 and lor.GetKeystones then
-                local allKeys = lor:GetKeystones()
-                if type(allKeys) == "table" then
-                    r1 = allKeys[unit] or (guid and allKeys[guid]) or allKeys[shortName] or allKeys[fullName]
-                end
+            if not r1 and lor.keystones then
+                r1 = lor.keystones[unit] or (guid and lor.keystones[guid]) or lor.keystones[shortName] or lor.keystones[fullName]
             end
-            if not r1 and lor.keystones then r1 = lor.keystones[unit] or (guid and lor.keystones[guid]) or lor.keystones[shortName] or lor.keystones[fullName] end
-            if not r1 and lor.KeystoneInfo then r1 = lor.KeystoneInfo[unit] or (guid and lor.KeystoneInfo[guid]) or lor.KeystoneInfo[shortName] or lor.KeystoneInfo[fullName] end
+            if not r1 and lor.KeystoneInfo then
+                r1 = lor.KeystoneInfo[unit] or (guid and lor.KeystoneInfo[guid]) or lor.KeystoneInfo[shortName] or lor.KeystoneInfo[fullName]
+            end
             if not r1 and lor.allyData then
                 local ally = lor.allyData[unit] or (guid and lor.allyData[guid]) or lor.allyData[shortName] or lor.allyData[fullName]
                 if ally then r1 = ally.keystone or ally.keystoneInfo or ally end
@@ -280,21 +301,29 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 5. Check KeystoneLoot (KeystoneLootDB, KeystoneLootCharDB, KeystoneLootAPI)
+    -- 6. Check KeystoneLoot (Fast Direct Table Lookup)
     if _G.KeystoneLootDB or _G.KeystoneLootAPI or _G.KeystoneLootCharDB then
         pcall(function()
-            local kl = _G.KeystoneLootDB or _G.KeystoneLootAPI or _G.KeystoneLootCharDB
-            if kl then
-                local mID, lvl = DeepSearchTable(kl, searchNames, 0)
-                if mID and lvl then
-                    KR:SaveMemberKey(name, mID, lvl, "KeystoneLoot")
+            local kl = _G.KeystoneLootCharDB or _G.KeystoneLootDB or _G.KeystoneLootAPI
+            if type(kl) == "table" then
+                for _, sName in ipairs(searchNames) do
+                    if sName then
+                        local entry = kl[sName] or (kl.characters and kl.characters[sName]) or (kl.keys and kl.keys[sName])
+                        if entry then
+                            local mID, lvl = ExtractMapAndLevel(entry)
+                            if mID and lvl then
+                                KR:SaveMemberKey(name, mID, lvl, "KeystoneLoot")
+                                break
+                            end
+                        end
+                    end
                 end
             end
         end)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 6. Check LibTomoKeystoneSync
+    -- 7. Check LibTomoKeystoneSync (Fast direct API calls)
     local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync or _G.TomoKeys
     if tomo then
@@ -302,9 +331,6 @@ function KR:FindPartyMemberKey(unit, name)
             local r1, r2
             if tomo.GetKeystone then r1, r2 = tomo:GetKeystone(unit) end
             if not r1 and tomo.GetKeystoneInfo then r1, r2 = tomo:GetKeystoneInfo(unit) end
-            if not r1 and tomo.GetPlayerKeystone then r1, r2 = tomo:GetPlayerKeystone(unit) end
-            if not r1 and tomo.GetKey then r1, r2 = tomo:GetKey(unit) end
-            if not r1 and tomo.GetKeystoneInfo then r1, r2 = tomo:GetKeystoneInfo(shortName) end
             if not r1 and tomo.keys then r1 = tomo.keys[fullName] or tomo.keys[shortName] or tomo.keys[unit] end
             if not r1 and tomo.keystones then r1 = tomo.keystones[fullName] or tomo.keystones[shortName] or tomo.keystones[unit] end
 
@@ -316,13 +342,12 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 7. Check LibOpenKeystone
+    -- 8. Check LibOpenKeystone (Fast direct API calls)
     local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
     if lok then
         pcall(function()
             local r1, r2
             if lok.GetKeystone then r1, r2 = lok:GetKeystone(unit) end
-            if not r1 and lok.GetKeystoneInfo then r1, r2 = lok:GetKeystoneInfo(unit) end
             if not r1 and lok.keystones then r1 = lok.keystones[fullName] or lok.keystones[shortName] end
 
             local mID, lvl = ExtractMapAndLevel(r1, r2)
@@ -333,7 +358,7 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 8. Check Details!
+    -- 9. Check Details! & AstralKeys (Fast direct table index)
     if _G.Details and _G.Details.Keystones then
         pcall(function()
             local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
@@ -345,7 +370,6 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 9. Check AstralKeys
     if _G.AstralKeys then
         pcall(function()
             local aKey
@@ -360,38 +384,30 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 11. Deep Global Scanner for EllesmereUI, EUI, KeystoneLoot, Tomo, ElvUI, Cell, OmniCD, etc.
-    for gName, gVal in pairs(_G) do
-        if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("Tust") or gName:find("EUI") or gName:find("Tomo") or gName:find("Elv") or gName:find("Key") or gName:find("Cell") or gName:find("Omni")) and type(gVal) == "table" then
+    -- 10. Deep Recursive Searcher (ONLY executed during explicit /kr resync or /kr debug)
+    if allowDeepSearch then
+        if _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup then
             pcall(function()
-                local mID, lvl = DeepSearchTable(gVal, searchNames, 0)
+                local eui = _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup
+                local mID, lvl = DeepSearchTable(eui, searchNames, 0)
                 if mID and lvl then
-                    KR:SaveMemberKey(name, mID, lvl, gName)
+                    KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
                 end
             end)
             if KR.groupMembers[name] then return KR.groupMembers[name] end
         end
-    end
 
-    -- 12. Tooltip Unit Scanner (C_TooltipInfo)
-    if C_TooltipInfo and C_TooltipInfo.GetUnit then
-        pcall(function()
-            local data = C_TooltipInfo.GetUnit(unit)
-            if data and data.lines then
-                for _, line in ipairs(data.lines) do
-                    if line.leftText then
-                        local lvl, dName = line.leftText:match("%+(%d+)%s+(.+)")
-                        if not lvl then dName, lvl = line.leftText:match("(.+)%s+%+(%d+)") end
-                        if lvl and dName then
-                            lvl = tonumber(lvl)
-                            if lvl and lvl > 0 then
-                                KR:SaveMemberKey(name, 507, lvl, "Tooltip")
-                            end
-                        end
+        for gName, gVal in pairs(_G) do
+            if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("Keystone")) and type(gVal) == "table" then
+                pcall(function()
+                    local mID, lvl = DeepSearchTable(gVal, searchNames, 0)
+                    if mID and lvl then
+                        KR:SaveMemberKey(name, mID, lvl, gName)
                     end
-                end
+                end)
+                if KR.groupMembers[name] then return KR.groupMembers[name] end
             end
-        end)
+        end
     end
 
     return KR.groupMembers[name] or KR.groupMembers[shortName]
@@ -589,6 +605,9 @@ end
 
 -- Scan Player Bag for Mythic+ Keystone
 function KR:ScanPlayerKeystone()
+    if InCombatLockdown() or KR.inCombat then
+        return KR.playerKey
+    end
     local mapID, level, itemLink
 
     -- Try C_MythicPlus API
@@ -643,7 +662,7 @@ end
 
 -- Broadcast Self Keystone to Party
 function KR:BroadcastKeystone()
-    if not IsInGroup() then return end
+    if InCombatLockdown() or KR.inCombat or not IsInGroup() then return end
     local key = KR:ScanPlayerKeystone()
     if key then
         local targetChan = IsInRaid() and "RAID" or "PARTY"
@@ -661,7 +680,7 @@ end
 
 -- Request Group Keystones
 function KR:RequestGroupKeystones()
-    if not IsInGroup() then return end
+    if InCombatLockdown() or KR.inCombat or not IsInGroup() then return end
     local targetChan = IsInRaid() and "RAID" or "PARTY"
 
     -- Invoke EllesmereUI functions
@@ -727,18 +746,28 @@ end
 
 -- Manual Resync All Keys Action
 function KR:ResyncAllKeys()
+    if InCombatLockdown() or KR.inCombat then
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r Cannot resync keys during combat.")
+        end
+        return
+    end
     KR:ScanPlayerKeystone()
     KR:RequestGroupKeystones()
     KR:BroadcastKeystone()
-    KR:UpdateGroupRoster()
+    KR:UpdateGroupRoster(true)
 
     -- Staggered async timers to capture network responses
     C_Timer.After(0.4, function()
-        KR:RequestGroupKeystones()
-        KR:UpdateGroupRoster()
+        if not InCombatLockdown() then
+            KR:RequestGroupKeystones()
+            KR:UpdateGroupRoster(true)
+        end
     end)
     C_Timer.After(1.2, function()
-        KR:UpdateGroupRoster()
+        if not InCombatLockdown() then
+            KR:UpdateGroupRoster(true)
+        end
     end)
 
     if KR.UIFrame and KR.UIFrame.banner then
@@ -748,7 +777,11 @@ function KR:ResyncAllKeys()
 end
 
 -- Update Group Roster Data
-function KR:UpdateGroupRoster()
+function KR:UpdateGroupRoster(allowDeepSearch)
+    if InCombatLockdown() or KR.inCombat then
+        KR.pendingRosterUpdate = true
+        return
+    end
     KR:ScanPlayerKeystone()
     local members = {}
 
@@ -783,7 +816,7 @@ function KR:UpdateGroupRoster()
                     name = name,
                     class = class,
                     role = role,
-                    key = KR:FindPartyMemberKey(unit, name),
+                    key = KR:FindPartyMemberKey(unit, name, allowDeepSearch),
                     isSelf = false,
                 })
             end
@@ -799,6 +832,31 @@ end
 
 -- Event Listener Handler
 KR.frame:SetScript("OnEvent", function(self, event, ...)
+    if event == "PLAYER_REGEN_DISABLED" then
+        KR.inCombat = true
+        return
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        KR.inCombat = false
+        if KR.pendingRosterUpdate then
+            KR.pendingRosterUpdate = false
+            C_Timer.After(0.5, function()
+                if not InCombatLockdown() then
+                    KR:ScanPlayerKeystone()
+                    KR:UpdateGroupRoster()
+                end
+            end)
+        end
+        return
+    end
+
+    -- Strict Combat Protection Guard: Freeze all background calculations during dungeon fights!
+    if InCombatLockdown() or KR.inCombat then
+        if event == "GROUP_ROSTER_UPDATE" or event == "BAG_UPDATE_DELAYED" then
+            KR.pendingRosterUpdate = true
+        end
+        return
+    end
+
     if event == "ADDON_LOADED" then
         local loadedAddon = ...
         if loadedAddon == addonName then
@@ -825,14 +883,22 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "GROUP_ROSTER_UPDATE" then
-        KR:BroadcastKeystone()
-        KR:RequestGroupKeystones()
-        KR:UpdateGroupRoster()
+        local now = GetTime()
+        if not KR.lastRosterUpdate or (now - KR.lastRosterUpdate) > 2 then
+            KR.lastRosterUpdate = now
+            KR:BroadcastKeystone()
+            KR:RequestGroupKeystones()
+            KR:UpdateGroupRoster()
+        end
 
     elseif event == "BAG_UPDATE_DELAYED" then
-        KR:ScanPlayerKeystone()
-        KR:BroadcastKeystone()
-        KR:UpdateGroupRoster()
+        local now = GetTime()
+        if not KR.lastBagScan or (now - KR.lastBagScan) > 5 then
+            KR.lastBagScan = now
+            KR:ScanPlayerKeystone()
+            KR:BroadcastKeystone()
+            KR:UpdateGroupRoster()
+        end
 
     elseif event:sub(1, 8) == "CHAT_MSG" and event ~= "CHAT_MSG_ADDON" then
         -- Party Chat Keystone Link Auto-Parser!
@@ -972,6 +1038,13 @@ end
 
 -- Toggle UI Function
 function KR:ToggleUI()
+    if InCombatLockdown() or KR.inCombat then
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r Cannot open UI frame during combat.")
+        end
+        return
+    end
+
     if not KR.UIFrame then
         if KR.CreateMainFrame then
             KR:CreateMainFrame()

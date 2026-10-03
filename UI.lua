@@ -349,7 +349,7 @@ end
 
 -- Refresh UI Card Display
 function KR:OnGroupUpdated()
-    if not mainFrame then CreateMainFrame() end
+    if not mainFrame or not mainFrame:IsShown() then return end
     local members = KR.currentMembers or {}
 
     for i = 1, 5 do
