@@ -33,10 +33,11 @@ SafeRegisterEvent("CHAT_MSG_PARTY_LEADER")
 SafeRegisterEvent("CHAT_MSG_RAID")
 SafeRegisterEvent("CHAT_MSG_RAID_LEADER")
 
--- Register Popular, LibTomoKeystoneSync, LibKeystone & LibOpenRaid Addon Channel Prefixes
+-- Register Popular, EllesmereUI, LibOpenKeystone, LibTomoKeystoneSync, LibKeystone & LibOpenRaid Addon Channel Prefixes
 local function RegisterAddonPrefixes()
     local prefixes = {
-        "KeyRoulette", "LibTomoKeystoneSync", "LibTomoKeystoneSync-1.0", "TomoKeystoneSync", "TomoKeys", "LTKS",
+        "KeyRoulette", "EllesmereUI", "Ellesmere", "LibOpenKeystone", "LibOpenKeystone-1.0",
+        "LibTomoKeystoneSync", "LibTomoKeystoneSync-1.0", "TomoKeystoneSync", "TomoKeys", "LTKS",
         "LibKeystone", "LibKeystone-1.0", "LKS", "LKS1", "LibDungeonKeys-1.0",
         "LibOpenRaid", "LibOpenRaid-1.0", "LOR", "LOR1", "OpenRaid",
         "AstralKeys", "Details", "MythicKeystones"
@@ -46,7 +47,7 @@ local function RegisterAddonPrefixes()
     end
 end
 
--- Register Library Event Callbacks (LibOpenRaid & LibTomoKeystoneSync)
+-- Register Library Event Callbacks (LibOpenRaid, LibTomoKeystoneSync, LibOpenKeystone)
 local function RegisterLibraryCallbacks()
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor and lor.RegisterCallback then
@@ -62,6 +63,15 @@ local function RegisterLibraryCallbacks()
     if tomo and tomo.RegisterCallback then
         pcall(function()
             tomo:RegisterCallback("KeystoneUpdate", function()
+                KR:UpdateGroupRoster()
+            end)
+        end)
+    end
+
+    local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
+    if lok and lok.RegisterCallback then
+        pcall(function()
+            lok:RegisterCallback("KeystoneUpdate", function()
                 KR:UpdateGroupRoster()
             end)
         end)
@@ -150,7 +160,7 @@ function KR:SaveMemberKey(rawName, mapID, level, source)
     KeyRouletteDB.groupKeys[fullName] = keyData
 end
 
--- Comprehensive Keystone Lookup Engine (LibTomoKeystoneSync, EllesmereUI, LibOpenRaid, Details!, AstralKeys, DB Persistence)
+-- Comprehensive Keystone Lookup Engine (EllesmereUI, LibOpenKeystone, LibTomoKeystoneSync, LibOpenRaid, Details!, AstralKeys, Tooltip Parser)
 function KR:FindPartyMemberKey(unit, name)
     if not name then return nil end
     local shortName = name:match("([^-]+)") or name
@@ -176,7 +186,81 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 4. Check LibTomoKeystoneSync (EllesmereUI Native Library!)
+    -- 4. Check EllesmereUI & EllesmereUIDB Namespace (EllesmereUI Native Storage)
+    local eui = _G.EllesmereUI or _G.Ellesmere
+    if eui then
+        local eKey
+        pcall(function()
+            if eui.GetKeystone then
+                eKey = eui:GetKeystone(unit) or eui:GetKeystone(shortName) or eui:GetKeystone(fullName)
+            end
+            if not eKey and eui.GetKeystoneInfo then
+                eKey = eui:GetKeystoneInfo(unit) or eui:GetKeystoneInfo(shortName) or eui:GetKeystoneInfo(fullName)
+            end
+            if not eKey and eui.keystones then
+                eKey = eui.keystones[fullName] or eui.keystones[shortName] or eui.keystones[unit]
+            end
+            if not eKey and eui.partyKeys then
+                eKey = eui.partyKeys[fullName] or eui.partyKeys[shortName] or eui.partyKeys[unit]
+            end
+            if not eKey and eui.db and eui.db.keystones then
+                eKey = eui.db.keystones[fullName] or eui.db.keystones[shortName]
+            end
+        end)
+        if eKey then
+            local mapID = tonumber(eKey.mapID or eKey.challengeMapID or eKey.dungeonID or (type(eKey) == "table" and eKey[1]))
+            local level = tonumber(eKey.level or eKey.keyLevel or (type(eKey) == "table" and eKey[2]))
+            if mapID and mapID > 0 and level and level > 0 then
+                KR:SaveMemberKey(name, mapID, level, "EllesmereUI")
+                return KR.groupMembers[name]
+            end
+        end
+    end
+
+    if _G.EllesmereUIDB then
+        local edb = _G.EllesmereUIDB
+        local eKey
+        pcall(function()
+            if edb.keystones then
+                eKey = edb.keystones[fullName] or edb.keystones[shortName] or edb.keystones[name]
+            end
+            if not eKey and edb.keys then
+                eKey = edb.keys[fullName] or edb.keys[shortName] or edb.keys[name]
+            end
+            if not eKey and edb.partyKeys then
+                eKey = edb.partyKeys[fullName] or edb.partyKeys[shortName] or edb.partyKeys[name]
+            end
+        end)
+        if eKey then
+            local mapID = tonumber(eKey.mapID or eKey.challengeMapID or eKey.dungeonID or (type(eKey) == "table" and eKey[1]))
+            local level = tonumber(eKey.level or eKey.keyLevel or (type(eKey) == "table" and eKey[2]))
+            if mapID and mapID > 0 and level and level > 0 then
+                KR:SaveMemberKey(name, mapID, level, "EllesmereUIDB")
+                return KR.groupMembers[name]
+            end
+        end
+    end
+
+    -- 5. Check LibOpenKeystone
+    local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
+    if lok then
+        local kData
+        pcall(function()
+            if lok.GetKeystone then kData = lok:GetKeystone(unit) or lok:GetKeystone(shortName) or lok:GetKeystone(fullName) end
+            if not kData and lok.GetKeystoneInfo then kData = lok:GetKeystoneInfo(unit) or lok:GetKeystoneInfo(shortName) or lok:GetKeystoneInfo(fullName) end
+            if not kData and lok.keystones then kData = lok.keystones[fullName] or lok.keystones[shortName] end
+        end)
+        if kData then
+            local mapID = tonumber(kData.mapID or kData.dungeonID or (type(kData) == "table" and kData[1]))
+            local level = tonumber(kData.level or kData.keyLevel or (type(kData) == "table" and kData[2]))
+            if mapID and mapID > 0 and level and level > 0 then
+                KR:SaveMemberKey(name, mapID, level, "LibOpenKeystone")
+                return KR.groupMembers[name]
+            end
+        end
+    end
+
+    -- 6. Check LibTomoKeystoneSync
     local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync or _G.TomoKeys
     if tomo then
@@ -215,7 +299,7 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 5. Direct LibOpenRaid Inspection (Used by ElvUI, OmniCD)
+    -- 7. Direct LibOpenRaid Inspection
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor then
         local kInfo
@@ -241,7 +325,7 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 6. Direct Details! KeyLList Inspection
+    -- 8. Direct Details! KeyLList Inspection
     if _G.Details and _G.Details.Keystones then
         local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
         if dKey then
@@ -254,7 +338,7 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 7. Direct AstralKeys Inspection
+    -- 9. Direct AstralKeys Inspection
     if _G.AstralKeys then
         local aKey
         pcall(function()
@@ -274,7 +358,30 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    return nil
+    -- 10. Check Tooltip Info (C_TooltipInfo Unit Inspection)
+    if C_TooltipInfo and C_TooltipInfo.GetUnit then
+        pcall(function()
+            local data = C_TooltipInfo.GetUnit(unit)
+            if data and data.lines then
+                for _, line in ipairs(data.lines) do
+                    if line.leftText then
+                        local lvl, dName = line.leftText:match("%+(%d+)%s+(.+)")
+                        if not lvl then
+                            dName, lvl = line.leftText:match("(.+)%s+%+(%d+)")
+                        end
+                        if lvl and dName then
+                            lvl = tonumber(lvl)
+                            if lvl and lvl > 0 then
+                                KR:SaveMemberKey(name, 507, lvl, "Tooltip")
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
+    return KR.groupMembers[name] or KR.groupMembers[shortName]
 end
 
 -- Scan Player Bag for Mythic+ Keystone
@@ -331,13 +438,15 @@ function KR:ScanPlayerKeystone()
     return KR.playerKey
 end
 
--- Broadcast Self Keystone to Party (KeyRoulette, LibTomoKeystoneSync, LibKeystone & LibOpenRaid compatible)
+-- Broadcast Self Keystone to Party (KeyRoulette, EllesmereUI, LibOpenKeystone, LibTomoKeystoneSync, LibKeystone & LibOpenRaid compatible)
 function KR:BroadcastKeystone()
     if not IsInGroup() then return end
     local key = KR:ScanPlayerKeystone()
     if key then
         local targetChan = IsInRaid() and "RAID" or "PARTY"
         pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or ""), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "EllesmereUI", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LibOpenKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LTKS", string.format("%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
@@ -351,6 +460,24 @@ end
 function KR:RequestGroupKeystones()
     if not IsInGroup() then return end
     local targetChan = IsInRaid() and "RAID" or "PARTY"
+
+    -- Invoke EllesmereUI functions
+    local eui = _G.EllesmereUI or _G.Ellesmere
+    if eui then
+        pcall(function()
+            if eui.RequestKeystones then eui:RequestKeystones() end
+            if eui.SyncKeystones then eui:SyncKeystones() end
+        end)
+    end
+
+    -- Invoke LibOpenKeystone functions
+    local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
+    if lok then
+        pcall(function()
+            if lok.RequestKeystones then lok:RequestKeystones() end
+            if lok.SendKeystone then lok:SendKeystone() end
+        end)
+    end
 
     -- Invoke LibOpenRaid functions
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
@@ -385,6 +512,8 @@ function KR:RequestGroupKeystones()
 
     -- Send network pings
     pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", targetChan)
+    pcall(C_ChatInfo.SendAddonMessage, "EllesmereUI", "REQUEST", targetChan)
+    pcall(C_ChatInfo.SendAddonMessage, "LibOpenKeystone", "REQUEST", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", "REQUEST", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LTKS", "REQ", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", "REQUEST", targetChan)
@@ -527,6 +656,20 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                 local mapID, level = message:match("KEY:(%d+):(%d+)")
                 if mapID and level then
                     KR:SaveMemberKey(senderName, tonumber(mapID), tonumber(level), "Synced")
+                    KR:UpdateGroupRoster()
+                end
+            end
+
+        elseif prefix == "EllesmereUI" or prefix == "Ellesmere" or prefix == "LibOpenKeystone" or prefix == "LibOpenKeystone-1.0" then
+            if message == "REQUEST" or message == "REQ" or message == "PING" then
+                KR:BroadcastKeystone()
+            else
+                local mID, lvl = message:match("KEY:(%d+):(%d+)")
+                              or message:match("KEY,(%d+),(%d+)")
+                              or message:match("(%d+):(%d+)")
+                              or message:match("(%d+),(%d+)")
+                if mID and lvl then
+                    KR:SaveMemberKey(senderName, tonumber(mID), tonumber(lvl), "EllesmereUI")
                     KR:UpdateGroupRoster()
                 end
             end
