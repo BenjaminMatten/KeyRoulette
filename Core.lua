@@ -333,37 +333,7 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 8. Check RaiderIO (Direct mythicKeystoneProfile parser)
-    if _G.RaiderIO and _G.RaiderIO.GetProfile then
-        pcall(function()
-            local prof = _G.RaiderIO.GetProfile(unit) or _G.RaiderIO.GetProfile(shortName) or _G.RaiderIO.GetProfile(fullName) or _G.RaiderIO.GetProfile(name)
-            if prof then
-                local mkp = prof.mythicKeystoneProfile or prof.keystoneProfile or prof.mplusProfile
-                if mkp then
-                    local lvl = tonumber(mkp.maxDungeonLevel or mkp.level or mkp.currentLevel or mkp.keystoneLevel)
-                    local maxDung = mkp.maxDungeon or mkp.currentDungeon or mkp.dungeon
-                    local mID = ExtractMapAndLevel(maxDung) or (type(maxDung) == "table" and tonumber(maxDung.mapID or maxDung.id or maxDung.zone_id or maxDung.challengeModeID or maxDung[1])) or 507
-
-                    if lvl and lvl > 0 then
-                        KR:SaveMemberKey(name, mID, lvl, "RaiderIO")
-                        if type(maxDung) == "table" and (maxDung.name or maxDung.shortName) and KR.groupMembers[name] then
-                            KR.groupMembers[name].dungeonName = maxDung.name or maxDung.shortName
-                        end
-                    end
-                end
-
-                if not KR.groupMembers[name] then
-                    local mID, lvl = ExtractMapAndLevel(prof.keystone or prof.currentKeystone or prof.mythicKeystone or prof)
-                    if mID and lvl then
-                        KR:SaveMemberKey(name, mID, lvl, "RaiderIO")
-                    end
-                end
-            end
-        end)
-        if KR.groupMembers[name] then return KR.groupMembers[name] end
-    end
-
-    -- 9. Check Details!
+    -- 8. Check Details!
     if _G.Details and _G.Details.Keystones then
         pcall(function()
             local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
@@ -375,7 +345,7 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 10. Check AstralKeys
+    -- 9. Check AstralKeys
     if _G.AstralKeys then
         pcall(function()
             local aKey
@@ -867,7 +837,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
     elseif event:sub(1, 8) == "CHAT_MSG" and event ~= "CHAT_MSG_ADDON" then
         -- Party Chat Keystone Link Auto-Parser!
         local text, sender = ...
-        if text and text:find("keystone:") then
+        if text and sender then
             local senderName = (Ambiguate and Ambiguate(sender, "none")) or sender:match("([^-]+)") or sender
             local mapID, level = text:match("keystone:%d+:(%d+):(%d+)")
             if mapID and level then
@@ -875,6 +845,19 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                 level = tonumber(level)
                 KR:SaveMemberKey(senderName, mapID, level, "Chat Link")
                 KR:UpdateGroupRoster()
+            else
+                local lvl, dName = text:match("%+(%d+)%s+([^%]+)]?")
+                if not lvl then dName, lvl = text:match("([^%+%[b]+)%s*%+(%d+)") end
+                if lvl and dName then
+                    lvl = tonumber(lvl)
+                    if lvl and lvl > 0 then
+                        KR:SaveMemberKey(senderName, 507, lvl, "Chat Text")
+                        if KR.groupMembers[senderName] then
+                            KR.groupMembers[senderName].dungeonName = dName:gsub("^%s*(.-)%s*$", "%1")
+                        end
+                        KR:UpdateGroupRoster()
+                    end
+                end
             end
         end
 
