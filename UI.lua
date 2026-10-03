@@ -557,7 +557,7 @@ end
 
 -- Auto Initialize UI on Load
 local initFrame = CreateFrame("Frame")
-initFrame:RegisterEvent("PLAYER_LOGIN")
+pcall(function() initFrame:RegisterEvent("PLAYER_LOGIN") end)
 initFrame:SetScript("OnEvent", function()
     CreateMainFrame()
     CreateMinimapButton()

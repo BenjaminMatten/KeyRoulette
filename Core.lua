@@ -17,13 +17,16 @@ KR.manualKeys = {}
 KR.excludedKeys = {}
 KR.dungeonCache = {}
 
--- Event Registration
-KR.frame:RegisterEvent("ADDON_LOADED")
-KR.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-KR.frame:RegisterEvent("GROUP_ROSTER_UPDATE")
-KR.frame:RegisterEvent("BAG_UPDATE_DELAYED")
-KR.frame:RegisterEvent("CHALLENGE_MODE_KEYSTONE_RECEPTACLE_OPEN")
-KR.frame:RegisterEvent("CHAT_MSG_ADDON")
+-- Safe Event Registration
+local function SafeRegisterEvent(evt)
+    pcall(function() KR.frame:RegisterEvent(evt) end)
+end
+
+SafeRegisterEvent("ADDON_LOADED")
+SafeRegisterEvent("PLAYER_ENTERING_WORLD")
+SafeRegisterEvent("GROUP_ROSTER_UPDATE")
+SafeRegisterEvent("BAG_UPDATE_DELAYED")
+SafeRegisterEvent("CHAT_MSG_ADDON")
 
 -- Class Colors Helper
 function KR:GetPlayerClassColor()
