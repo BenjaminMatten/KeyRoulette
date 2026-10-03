@@ -106,10 +106,20 @@ local function CreateMainFrame()
     closeBtn:SetText("✕")
     closeBtn:SetScript("OnClick", function() mainFrame:Hide() end)
 
+    -- Debug Copy Button
+    local debugBtn = CreateFrame("Button", nil, mainFrame)
+    debugBtn:SetSize(20, 20)
+    debugBtn:SetPoint("RIGHT", closeBtn, "LEFT", -6, 0)
+    debugBtn:SetNormalFontObject("GameFontHighlight")
+    debugBtn:SetText("📋")
+    debugBtn:SetScript("OnClick", function()
+        if KR.RunDebug then KR:RunDebug() end
+    end)
+
     -- Refresh Button
     local refreshBtn = CreateFrame("Button", nil, mainFrame)
     refreshBtn:SetSize(20, 20)
-    refreshBtn:SetPoint("RIGHT", closeBtn, "LEFT", -8, 0)
+    refreshBtn:SetPoint("RIGHT", debugBtn, "LEFT", -6, 0)
     refreshBtn:SetNormalFontObject("GameFontHighlight")
     refreshBtn:SetText("🔄")
     refreshBtn:SetScript("OnClick", function()
@@ -416,14 +426,19 @@ function KR:ShowManualEditModal(member)
                 local lvl = tonumber(manualModal.lvlInput:GetText()) or 10
                 local dName = manualModal.dungInput:GetText()
                 if dName == "" then dName = "Custom Key" end
+                local mName = manualModal.targetMember.name
 
-                KR.manualKeys[manualModal.targetMember.name] = {
+                KR.manualKeys[mName] = {
                     mapID = 507,
                     level = lvl,
                     dungeonName = dName,
                     icon = 5254320,
                     source = "Manual"
                 }
+                KR:SaveMemberKey(mName, 507, lvl, "Manual")
+                if KR.groupMembers[mName] then
+                    KR.groupMembers[mName].dungeonName = dName
+                end
                 if KR.UpdateGroupRoster then KR:UpdateGroupRoster() end
             end
             manualModal:Hide()
@@ -446,6 +461,72 @@ function KR:ShowManualEditModal(member)
     manualModal.lvlInput:SetText(tostring(member.key and member.key.level or "10"))
     manualModal.dungInput:SetText(member.key and member.key.dungeonName or "Ara-Kara, City of Echoes")
     manualModal:Show()
+end
+
+local copyModal
+
+-- Copy Log Window Modal
+function KR:ShowCopyWindow(text)
+    local pr, pg, pb, phex = KR:GetPlayerClassColor()
+    local template = BackdropTemplateMixin and "BackdropTemplate" or nil
+
+    if not copyModal then
+        copyModal = CreateFrame("Frame", "KeyRouletteCopyModal", UIParent, template)
+        copyModal:SetSize(480, 320)
+        copyModal:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        copyModal:SetFrameStrata("DIALOG")
+        copyModal:EnableMouse(true)
+        copyModal:SetMovable(true)
+        copyModal:RegisterForDrag("LeftButton")
+        copyModal:SetScript("OnDragStart", function(self) self:StartMoving() end)
+        copyModal:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+        ApplyStyle(copyModal, 0.06, 0.06, 0.08, 0.98, pr, pg, pb, 1)
+
+        local title = copyModal:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        title:SetPoint("TOPLEFT", copyModal, "TOPLEFT", 16, -14)
+        title:SetText("|c" .. phex .. "Key Roulette Debug Log|r")
+
+        local subtitle = copyModal:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        subtitle:SetPoint("LEFT", title, "RIGHT", 10, 0)
+        subtitle:SetText("Press Cmd+C / Ctrl+C to copy")
+
+        local closeBtn = CreateFrame("Button", nil, copyModal)
+        closeBtn:SetSize(20, 20)
+        closeBtn:SetPoint("TOPRIGHT", copyModal, "TOPRIGHT", -12, -12)
+        closeBtn:SetNormalFontObject("GameFontHighlight")
+        closeBtn:SetText("✕")
+        closeBtn:SetScript("OnClick", function() copyModal:Hide() end)
+
+        local scrollArea = CreateFrame("ScrollFrame", "KeyRouletteCopyScroll", copyModal, "UIPanelScrollFrameTemplate")
+        scrollArea:SetPoint("TOPLEFT", copyModal, "TOPLEFT", 16, -42)
+        scrollArea:SetPoint("BOTTOMRIGHT", copyModal, "BOTTOMRIGHT", -36, 45)
+        ApplyStyle(scrollArea, 0.03, 0.03, 0.04, 0.8, 0.12, 0.12, 0.15, 1)
+
+        local editBox = CreateFrame("EditBox", nil, scrollArea)
+        editBox:SetMultiLine(true)
+        editBox:SetMaxLetters(99999)
+        editBox:SetFontObject("ChatFontNormal")
+        editBox:SetWidth(410)
+        editBox:SetAutoFocus(true)
+        editBox:SetScript("OnEscapePressed", function() copyModal:Hide() end)
+
+        scrollArea:SetScrollChild(editBox)
+        copyModal.editBox = editBox
+
+        local doneBtn = CreateFrame("Button", nil, copyModal, template)
+        doneBtn:SetSize(120, 26)
+        doneBtn:SetPoint("BOTTOM", copyModal, "BOTTOM", 0, 10)
+        ApplyStyle(doneBtn, pr * 0.3, pg * 0.3, pb * 0.3, 1, pr, pg, pb, 1)
+        local dt = doneBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        dt:SetPoint("CENTER", doneBtn, "CENTER", 0, 0)
+        dt:SetText("Close")
+        doneBtn:SetScript("OnClick", function() copyModal:Hide() end)
+    end
+
+    copyModal.editBox:SetText(text or "")
+    copyModal.editBox:HighlightText()
+    copyModal.editBox:SetFocus()
+    copyModal:Show()
 end
 
 -- Roulette Spin Wheel Animation & Selection Logic

@@ -32,29 +32,29 @@ SafeRegisterEvent("CHAT_MSG_PARTY")
 SafeRegisterEvent("CHAT_MSG_PARTY_LEADER")
 SafeRegisterEvent("CHAT_MSG_RAID")
 SafeRegisterEvent("CHAT_MSG_RAID_LEADER")
+SafeRegisterEvent("CHAT_MSG_SAY")
+SafeRegisterEvent("CHAT_MSG_INSTANCE_CHAT")
 
--- Register Popular, EllesmereUI, LibOpenKeystone, LibTomoKeystoneSync, LibKeystone & LibOpenRaid Addon Channel Prefixes
+-- Register Addon Communication Prefixes
 local function RegisterAddonPrefixes()
     local prefixes = {
         "KeyRoulette", "EllesmereUI", "Ellesmere", "LibOpenKeystone", "LibOpenKeystone-1.0",
         "LibTomoKeystoneSync", "LibTomoKeystoneSync-1.0", "TomoKeystoneSync", "TomoKeys", "LTKS",
         "LibKeystone", "LibKeystone-1.0", "LKS", "LKS1", "LibDungeonKeys-1.0",
         "LibOpenRaid", "LibOpenRaid-1.0", "LOR", "LOR1", "OpenRaid",
-        "AstralKeys", "Details", "MythicKeystones"
+        "AstralKeys", "Details", "MythicKeystones", "RaiderIO"
     }
     for _, p in ipairs(prefixes) do
         pcall(C_ChatInfo.RegisterAddonMessagePrefix, p)
     end
 end
 
--- Register Library Event Callbacks (LibOpenRaid, LibTomoKeystoneSync, LibOpenKeystone)
+-- Register Library Event Callbacks
 local function RegisterLibraryCallbacks()
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor and lor.RegisterCallback then
         pcall(function()
-            lor:RegisterCallback("KeystoneUpdate", function()
-                KR:UpdateGroupRoster()
-            end)
+            lor:RegisterCallback("KeystoneUpdate", function() KR:UpdateGroupRoster() end)
         end)
     end
 
@@ -62,18 +62,14 @@ local function RegisterLibraryCallbacks()
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync
     if tomo and tomo.RegisterCallback then
         pcall(function()
-            tomo:RegisterCallback("KeystoneUpdate", function()
-                KR:UpdateGroupRoster()
-            end)
+            tomo:RegisterCallback("KeystoneUpdate", function() KR:UpdateGroupRoster() end)
         end)
     end
 
     local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
     if lok and lok.RegisterCallback then
         pcall(function()
-            lok:RegisterCallback("KeystoneUpdate", function()
-                KR:UpdateGroupRoster()
-            end)
+            lok:RegisterCallback("KeystoneUpdate", function() KR:UpdateGroupRoster() end)
         end)
     end
 end
@@ -116,7 +112,7 @@ function KR:GetDungeonInfo(mapID)
 
     if not name or name == "" then
         name = "Unknown Key (" .. mapID .. ")"
-        texture = 5254320 -- Default Mythic Keystone Icon
+        texture = 5254320
     end
 
     local info = {
@@ -160,12 +156,51 @@ function KR:SaveMemberKey(rawName, mapID, level, source)
     KeyRouletteDB.groupKeys[fullName] = keyData
 end
 
--- Comprehensive Keystone Lookup Engine (EllesmereUI Deep Global Scanner, LibOpenKeystone, LibTomoKeystoneSync, LibOpenRaid, Details!, AstralKeys, Tooltip Parser)
+-- Universal MapID and Level Extractor (Handles tables, multi-returns, string pairs)
+local function ExtractMapAndLevel(res1, res2)
+    if type(res1) == "table" then
+        local mID = tonumber(res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1[1])
+        local lvl = tonumber(res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1[2])
+        return mID, lvl
+    elseif type(res1) == "number" and type(res2) == "number" then
+        return res1, res2
+    elseif type(res1) == "string" then
+        local mID, lvl = res1:match("(%d+):(%d+)") or res1:match("(%d+),(%d+)")
+        if mID and lvl then return tonumber(mID), tonumber(lvl) end
+    end
+    return nil, nil
+end
+
+-- Deep Global Table Recursive Searcher (Finds keystone mapID + level for player name in any table)
+local function DeepSearchTable(tbl, searchNames, depth)
+    if not tbl or type(tbl) ~= "table" or (depth and depth > 3) then return nil, nil end
+    depth = (depth or 0) + 1
+
+    for key, val in pairs(tbl) do
+        if type(key) == "string" then
+            for _, sName in ipairs(searchNames) do
+                if key == sName or key:lower() == sName:lower() then
+                    local mID, lvl = ExtractMapAndLevel(val)
+                    if mID and lvl then return mID, lvl end
+                end
+            end
+        end
+
+        if type(val) == "table" and key ~= "_G" and key ~= "KR" and key ~= "KeyRoulette" then
+            local mID, lvl = DeepSearchTable(val, searchNames, depth)
+            if mID and lvl then return mID, lvl end
+        end
+    end
+    return nil, nil
+end
+
+-- Comprehensive Keystone Lookup Engine
 function KR:FindPartyMemberKey(unit, name)
     if not name then return nil end
     local shortName = name:match("([^-]+)") or name
     local realm = GetNormalizedRealmName() or GetRealmName() or ""
     local fullName = name:find("-") and name or (shortName .. "-" .. realm)
+    local searchNames = { fullName, shortName, name }
 
     -- 1. Check manual override
     if KR.manualKeys[name] then return KR.manualKeys[name] end
@@ -186,146 +221,121 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 4. Deep Global Scanner for EllesmereUI, EUI, Tomo, and ElvUI tables
-    for gName, gVal in pairs(_G) do
-        if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("ElvUI")) and type(gVal) == "table" then
-            pcall(function()
-                local kData = gVal[fullName] or gVal[shortName] or gVal[name]
-                if not kData and gVal.keystones then kData = gVal.keystones[fullName] or gVal.keystones[shortName] end
-                if not kData and gVal.keys then kData = gVal.keys[fullName] or gVal.keys[shortName] end
-                if not kData and gVal.db and gVal.db.keystones then kData = gVal.db.keystones[fullName] or gVal.db.keystones[shortName] end
-                if not kData and gVal.db and gVal.db.keys then kData = gVal.db.keys[fullName] or gVal.db.keys[shortName] end
-
-                if kData then
-                    local mapID = tonumber(kData.mapID or kData.challengeMapID or kData.dungeonID or (type(kData) == "table" and kData[1]))
-                    local level = tonumber(kData.level or kData.keyLevel or (type(kData) == "table" and kData[2]))
-                    if mapID and mapID > 0 and level and level > 0 then
-                        KR:SaveMemberKey(name, mapID, level, gName)
-                    end
-                end
-            end)
-        end
-    end
-    if KR.groupMembers[name] then return KR.groupMembers[name] end
-
-    -- 5. Check LibOpenKeystone
-    local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
-    if lok then
-        local kData
+    -- 4. Check LibOpenRaid
+    local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
+    if lor then
         pcall(function()
-            if lok.GetKeystone then kData = lok:GetKeystone(unit) or lok:GetKeystone(shortName) or lok:GetKeystone(fullName) end
-            if not kData and lok.GetKeystoneInfo then kData = lok:GetKeystoneInfo(unit) or lok:GetKeystoneInfo(shortName) or lok:GetKeystoneInfo(fullName) end
-            if not kData and lok.keystones then kData = lok.keystones[fullName] or lok.keystones[shortName] end
-        end)
-        if kData then
-            local mapID = tonumber(kData.mapID or kData.dungeonID or (type(kData) == "table" and kData[1]))
-            local level = tonumber(kData.level or kData.keyLevel or (type(kData) == "table" and kData[2]))
-            if mapID and mapID > 0 and level and level > 0 then
-                KR:SaveMemberKey(name, mapID, level, "LibOpenKeystone")
-                return KR.groupMembers[name]
+            local r1, r2
+            if lor.GetKeystoneInfo then r1, r2 = lor:GetKeystoneInfo(unit) end
+            if not r1 and lor.GetPlayerKeystone then r1, r2 = lor:GetPlayerKeystone(unit) end
+            if not r1 and lor.GetKeystoneInfo then r1, r2 = lor:GetKeystoneInfo(shortName) end
+            if not r1 and lor.GetKeystoneInfo then r1, r2 = lor:GetKeystoneInfo(fullName) end
+            if not r1 and lor.KeystoneInfo then r1 = lor.KeystoneInfo[fullName] or lor.KeystoneInfo[shortName] or lor.KeystoneInfo[unit] end
+
+            local mID, lvl = ExtractMapAndLevel(r1, r2)
+            if mID and lvl then
+                KR:SaveMemberKey(name, mID, lvl, "LibOpenRaid")
             end
-        end
+        end)
+        if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 6. Check LibTomoKeystoneSync
+    -- 5. Check LibTomoKeystoneSync
     local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync or _G.TomoKeys
     if tomo then
-        local tKey
         pcall(function()
-            if tomo.GetKeystone then
-                tKey = tomo:GetKeystone(unit) or tomo:GetKeystone(shortName) or tomo:GetKeystone(fullName)
-            end
-            if not tKey and tomo.GetKeystoneInfo then
-                tKey = tomo:GetKeystoneInfo(unit) or tomo:GetKeystoneInfo(shortName) or tomo:GetKeystoneInfo(fullName)
-            end
-            if not tKey and tomo.GetPlayerKeystone then
-                tKey = tomo:GetPlayerKeystone(unit) or tomo:GetPlayerKeystone(shortName) or tomo:GetPlayerKeystone(fullName)
-            end
-            if not tKey and tomo.GetKey then
-                tKey = tomo:GetKey(unit) or tomo:GetKey(shortName) or tomo:GetKey(fullName)
-            end
-            if not tKey and tomo.keys then
-                tKey = tomo.keys[fullName] or tomo.keys[shortName] or tomo.keys[unit] or tomo.keys[shortName:lower()]
-            end
-            if not tKey and tomo.keystones then
-                tKey = tomo.keystones[fullName] or tomo.keystones[shortName] or tomo.keystones[unit]
-            end
-            if not tKey and tomo.db then
-                tKey = tomo.db[fullName] or tomo.db[shortName] or tomo.db[unit]
+            local r1, r2
+            if tomo.GetKeystone then r1, r2 = tomo:GetKeystone(unit) end
+            if not r1 and tomo.GetKeystoneInfo then r1, r2 = tomo:GetKeystoneInfo(unit) end
+            if not r1 and tomo.GetPlayerKeystone then r1, r2 = tomo:GetPlayerKeystone(unit) end
+            if not r1 and tomo.GetKey then r1, r2 = tomo:GetKey(unit) end
+            if not r1 and tomo.GetKeystoneInfo then r1, r2 = tomo:GetKeystoneInfo(shortName) end
+            if not r1 and tomo.keys then r1 = tomo.keys[fullName] or tomo.keys[shortName] or tomo.keys[unit] end
+            if not r1 and tomo.keystones then r1 = tomo.keystones[fullName] or tomo.keystones[shortName] or tomo.keystones[unit] end
+
+            local mID, lvl = ExtractMapAndLevel(r1, r2)
+            if mID and lvl then
+                KR:SaveMemberKey(name, mID, lvl, "LibTomoKeystoneSync")
             end
         end)
-
-        if tKey then
-            local mapID = tonumber(tKey.mapID or tKey.challengeMapID or tKey.dungeonID or tKey.dungeon_id or (type(tKey) == "table" and tKey[1]))
-            local level = tonumber(tKey.level or tKey.keyLevel or tKey.key_level or tKey.levelNumber or (type(tKey) == "table" and tKey[2]))
-            if mapID and mapID > 0 and level and level > 0 then
-                KR:SaveMemberKey(name, mapID, level, "LibTomoKeystoneSync")
-                return KR.groupMembers[name]
-            end
-        end
+        if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 7. Direct LibOpenRaid Inspection
-    local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
-    if lor then
-        local kInfo
+    -- 6. Check LibOpenKeystone
+    local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
+    if lok then
         pcall(function()
-            if lor.GetKeystoneInfo then
-                kInfo = lor:GetKeystoneInfo(unit) or lor:GetKeystoneInfo(shortName) or lor:GetKeystoneInfo(fullName)
-            end
-            if not kInfo and lor.GetPlayerKeystone then
-                kInfo = lor:GetPlayerKeystone(unit) or lor:GetPlayerKeystone(shortName) or lor:GetPlayerKeystone(fullName)
-            end
-            if not kInfo and lor.KeystoneInfo then
-                kInfo = lor.KeystoneInfo[unit] or lor.KeystoneInfo[shortName] or lor.KeystoneInfo[fullName]
+            local r1, r2
+            if lok.GetKeystone then r1, r2 = lok:GetKeystone(unit) end
+            if not r1 and lok.GetKeystoneInfo then r1, r2 = lok:GetKeystoneInfo(unit) end
+            if not r1 and lok.keystones then r1 = lok.keystones[fullName] or lok.keystones[shortName] end
+
+            local mID, lvl = ExtractMapAndLevel(r1, r2)
+            if mID and lvl then
+                KR:SaveMemberKey(name, mID, lvl, "LibOpenKeystone")
             end
         end)
-
-        if kInfo then
-            local mapID = tonumber(kInfo.mapID or kInfo.challengeMapID or kInfo.dungeonID or (type(kInfo) == "table" and kInfo[1]))
-            local level = tonumber(kInfo.level or kInfo.keyLevel or kInfo.levelNumber or (type(kInfo) == "table" and kInfo[2]))
-            if mapID and mapID > 0 and level and level > 0 then
-                KR:SaveMemberKey(name, mapID, level, "LibOpenRaid")
-                return KR.groupMembers[name]
-            end
-        end
+        if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 8. Direct Details! KeyLList Inspection
+    -- 7. Check RaiderIO
+    if _G.RaiderIO then
+        pcall(function()
+            if _G.RaiderIO.GetProfile then
+                local prof = _G.RaiderIO.GetProfile(unit) or _G.RaiderIO.GetProfile(shortName) or _G.RaiderIO.GetProfile(fullName)
+                if prof then
+                    local mID, lvl = ExtractMapAndLevel(prof.keystone or prof.currentKeystone or prof)
+                    if mID and lvl then
+                        KR:SaveMemberKey(name, mID, lvl, "RaiderIO")
+                    end
+                end
+            end
+        end)
+        if KR.groupMembers[name] then return KR.groupMembers[name] end
+    end
+
+    -- 8. Check Details!
     if _G.Details and _G.Details.Keystones then
-        local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
-        if dKey then
-            local mapID = tonumber(dKey.mapID or dKey[1])
-            local level = tonumber(dKey.level or dKey[2])
-            if mapID and mapID > 0 and level and level > 0 then
-                KR:SaveMemberKey(name, mapID, level, "Details")
-                return KR.groupMembers[name]
-            end
-        end
-    end
-
-    -- 9. Direct AstralKeys Inspection
-    if _G.AstralKeys then
-        local aKey
         pcall(function()
-            if _G.AstralKeys.GetKey then
-                aKey = _G.AstralKeys:GetKey(shortName) or _G.AstralKeys:GetKey(fullName)
-            elseif type(_G.AstralKeys) == "table" then
-                aKey = _G.AstralKeys[shortName] or _G.AstralKeys[fullName]
+            local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
+            local mID, lvl = ExtractMapAndLevel(dKey)
+            if mID and lvl then
+                KR:SaveMemberKey(name, mID, lvl, "Details")
             end
         end)
-        if aKey then
-            local mapID = tonumber(aKey.dungeon_id or aKey.mapID or (type(aKey) == "table" and aKey[1]))
-            local level = tonumber(aKey.key_level or aKey.level or (type(aKey) == "table" and aKey[2]))
-            if mapID and mapID > 0 and level and level > 0 then
-                KR:SaveMemberKey(name, mapID, level, "AstralKeys")
-                return KR.groupMembers[name]
+        if KR.groupMembers[name] then return KR.groupMembers[name] end
+    end
+
+    -- 9. Check AstralKeys
+    if _G.AstralKeys then
+        pcall(function()
+            local aKey
+            if _G.AstralKeys.GetKey then aKey = _G.AstralKeys:GetKey(shortName) or _G.AstralKeys:GetKey(fullName) end
+            if not aKey and type(_G.AstralKeys) == "table" then aKey = _G.AstralKeys[shortName] or _G.AstralKeys[fullName] end
+
+            local mID, lvl = ExtractMapAndLevel(aKey)
+            if mID and lvl then
+                KR:SaveMemberKey(name, mID, lvl, "AstralKeys")
             end
+        end)
+        if KR.groupMembers[name] then return KR.groupMembers[name] end
+    end
+
+    -- 10. Deep Global Scanner for EllesmereUI, EUI, Tomo, and ElvUI tables
+    for gName, gVal in pairs(_G) do
+        if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("ElvUI") or gName:find("Keystone")) and type(gVal) == "table" then
+            pcall(function()
+                local mID, lvl = DeepSearchTable(gVal, searchNames, 0)
+                if mID and lvl then
+                    KR:SaveMemberKey(name, mID, lvl, gName)
+                end
+            end)
+            if KR.groupMembers[name] then return KR.groupMembers[name] end
         end
     end
 
-    -- 10. Check Tooltip Info (C_TooltipInfo Unit Inspection)
+    -- 11. Tooltip Unit Scanner (C_TooltipInfo)
     if C_TooltipInfo and C_TooltipInfo.GetUnit then
         pcall(function()
             local data = C_TooltipInfo.GetUnit(unit)
@@ -333,9 +343,7 @@ function KR:FindPartyMemberKey(unit, name)
                 for _, line in ipairs(data.lines) do
                     if line.leftText then
                         local lvl, dName = line.leftText:match("%+(%d+)%s+(.+)")
-                        if not lvl then
-                            dName, lvl = line.leftText:match("(.+)%s+%+(%d+)")
-                        end
+                        if not lvl then dName, lvl = line.leftText:match("(.+)%s+%+(%d+)") end
                         if lvl and dName then
                             lvl = tonumber(lvl)
                             if lvl and lvl > 0 then
@@ -351,28 +359,52 @@ function KR:FindPartyMemberKey(unit, name)
     return KR.groupMembers[name] or KR.groupMembers[shortName]
 end
 
--- Diagnostic Debug Command
+-- Diagnostic Debug Command (Saves to SavedVariables & Triggers Copy Window)
 function KR:RunDebug()
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc=== KEY ROULETTE DEBUG ===|r")
-    DEFAULT_CHAT_FRAME:AddMessage("In Group: " .. tostring(IsInGroup()) .. " | Num Members: " .. tostring(GetNumGroupMembers()))
+    local logLines = {}
+    local function AddLog(msg)
+        table.insert(logLines, msg)
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage(msg)
+        end
+    end
+
+    AddLog("|cff00ffcc=== KEY ROULETTE DEBUG ===|r")
+    AddLog("Time: " .. date("%Y-%m-%d %H:%M:%S"))
+    AddLog("In Group: " .. tostring(IsInGroup()) .. " | Num Members: " .. tostring(GetNumGroupMembers()))
     
     -- Check globals
-    DEFAULT_CHAT_FRAME:AddMessage("EllesmereUI: " .. tostring(_G.EllesmereUI ~= nil) .. " | EllesmereUIDB: " .. tostring(_G.EllesmereUIDB ~= nil))
-    DEFAULT_CHAT_FRAME:AddMessage("Details: " .. tostring(_G.Details ~= nil) .. " | AstralKeys: " .. tostring(_G.AstralKeys ~= nil))
-    DEFAULT_CHAT_FRAME:AddMessage("LibOpenRaid: " .. tostring(LibStub and LibStub("LibOpenRaid-1.0", true) ~= nil))
-    DEFAULT_CHAT_FRAME:AddMessage("LibTomo: " .. tostring(LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)) ~= nil))
-    DEFAULT_CHAT_FRAME:AddMessage("LibOpenKeystone: " .. tostring(LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true)) ~= nil))
+    AddLog("EllesmereUI: " .. tostring(_G.EllesmereUI ~= nil) .. " | EllesmereUIDB: " .. tostring(_G.EllesmereUIDB ~= nil))
+    AddLog("Details: " .. tostring(_G.Details ~= nil) .. " | AstralKeys: " .. tostring(_G.AstralKeys ~= nil))
+    AddLog("RaiderIO: " .. tostring(_G.RaiderIO ~= nil) .. " | ElvUI: " .. tostring(_G.ElvUI ~= nil))
+    AddLog("LibOpenRaid: " .. tostring(LibStub and LibStub("LibOpenRaid-1.0", true) ~= nil))
+    AddLog("LibTomo: " .. tostring(LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)) ~= nil))
+    AddLog("LibOpenKeystone: " .. tostring(LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true)) ~= nil))
+    AddLog("LibKeystone: " .. tostring(LibStub and LibStub("LibKeystone-1.0", true) ~= nil))
+
+    -- List all loaded keystone-related globals
+    local foundGlobals = {}
+    for gName in pairs(_G) do
+        if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Keystone") or gName:find("Tomo") or gName:find("OpenRaid")) then
+            table.insert(foundGlobals, gName)
+        end
+    end
+    if #foundGlobals > 0 then
+        AddLog("Found Related Globals: " .. table.concat(foundGlobals, ", "))
+    else
+        AddLog("No specific Ellesmere/Keystone globals found in _G.")
+    end
 
     -- Dump cached keys
     local count = 0
     if KR.groupMembers then
         for k, v in pairs(KR.groupMembers) do
             count = count + 1
-            DEFAULT_CHAT_FRAME:AddMessage("Cached Key [" .. tostring(k) .. "]: " .. tostring(v.dungeonName) .. " +" .. tostring(v.level) .. " (" .. tostring(v.source) .. ")")
+            AddLog("Cached Key [" .. tostring(k) .. "]: " .. tostring(v.dungeonName) .. " +" .. tostring(v.level) .. " (" .. tostring(v.source) .. ")")
         end
     end
     if count == 0 then
-        DEFAULT_CHAT_FRAME:AddMessage("No cached keys in memory.")
+        AddLog("No cached keys in memory.")
     end
 
     -- Dump Party Member 1-4
@@ -383,13 +415,27 @@ function KR:RunDebug()
             if UnitExists(unit) then
                 local name = UnitName(unit)
                 local key = KR:FindPartyMemberKey(unit, name)
-                DEFAULT_CHAT_FRAME:AddMessage("Party Member " .. i .. " (" .. tostring(name) .. "): " .. (key and ("+" .. key.level .. " " .. key.dungeonName .. " [" .. key.source .. "]") or "No Key Detected"))
+                AddLog("Party Member " .. i .. " (" .. tostring(name) .. "): " .. (key and ("+" .. key.level .. " " .. key.dungeonName .. " [" .. key.source .. "]") or "No Key Detected (Click 'Edit' to set)"))
             end
         end
     else
-        DEFAULT_CHAT_FRAME:AddMessage("Not in group (Solo).")
+        AddLog("Not in group (Solo).")
     end
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc===========================|r")
+    AddLog("|cff00ffcc===========================|r")
+
+    local reportText = table.concat(logLines, "\n")
+
+    -- Save to SavedVariables for file persistence
+    KeyRouletteDB = KeyRouletteDB or {}
+    KeyRouletteDB.latestDebugReport = reportText
+    KeyRouletteDB.debugLog = logLines
+
+    -- Show Copy Window Modal in UI
+    if KR.ShowCopyWindow then
+        KR:ShowCopyWindow(reportText)
+    end
+
+    return reportText
 end
 
 -- Scan Player Bag for Mythic+ Keystone
@@ -446,7 +492,7 @@ function KR:ScanPlayerKeystone()
     return KR.playerKey
 end
 
--- Broadcast Self Keystone to Party (KeyRoulette, EllesmereUI, LibOpenKeystone, LibTomoKeystoneSync, LibKeystone & LibOpenRaid compatible)
+-- Broadcast Self Keystone to Party
 function KR:BroadcastKeystone()
     if not IsInGroup() then return end
     local key = KR:ScanPlayerKeystone()
@@ -464,7 +510,7 @@ function KR:BroadcastKeystone()
     end
 end
 
--- Request Group Keystones (Invokes library functions & sends addon network pings)
+-- Request Group Keystones
 function KR:RequestGroupKeystones()
     if not IsInGroup() then return end
     local targetChan = IsInRaid() and "RAID" or "PARTY"
@@ -530,7 +576,7 @@ function KR:RequestGroupKeystones()
     pcall(C_ChatInfo.SendAddonMessage, "LOR", "REQ_KEY", targetChan)
 end
 
--- Manual Resync All Keys Action (Staggered multi-phase query)
+-- Manual Resync All Keys Action
 function KR:ResyncAllKeys()
     KR:ScanPlayerKeystone()
     KR:RequestGroupKeystones()
@@ -726,7 +772,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                 end
             end
 
-        elseif prefix == "AstralKeys" or prefix == "Details" or prefix == "MythicKeystones" then
+        elseif prefix == "AstralKeys" or prefix == "Details" or prefix == "MythicKeystones" or prefix == "RaiderIO" then
             if message and (message:find("(%d+):(%d+)") or message:find("(%d+),(%d+)")) then
                 local mID, lvl = message:match("(%d+):(%d+)") or message:match("(%d+),(%d+)")
                 if mID and lvl then
