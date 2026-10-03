@@ -32,11 +32,12 @@ SafeRegisterEvent("CHAT_MSG_PARTY_LEADER")
 SafeRegisterEvent("CHAT_MSG_RAID")
 SafeRegisterEvent("CHAT_MSG_RAID_LEADER")
 
--- Register Popular & LibKeystone Addon Channel Prefixes
+-- Register Popular, LibKeystone & LibOpenRaid Addon Channel Prefixes
 local function RegisterAddonPrefixes()
     local prefixes = {
         "KeyRoulette", "LibKeystone", "LibKeystone-1.0", "LKS", "LKS1",
-        "LibDungeonKeys-1.0", "AstralKeys", "Details", "LibOpenRaid", "MythicKeystones"
+        "LibDungeonKeys-1.0", "LibOpenRaid", "LibOpenRaid-1.0", "LOR", "LOR1", "OpenRaid",
+        "AstralKeys", "Details", "MythicKeystones"
     }
     for _, p in ipairs(prefixes) do
         pcall(C_ChatInfo.RegisterAddonMessagePrefix, p)
@@ -147,7 +148,7 @@ function KR:ScanPlayerKeystone()
     return KR.playerKey
 end
 
--- Broadcast Self Keystone to Party (KeyRoulette & LibKeystone compatible)
+-- Broadcast Self Keystone to Party (KeyRoulette, LibKeystone & LibOpenRaid compatible)
 function KR:BroadcastKeystone()
     if not IsInGroup() then return end
     local key = KR:ScanPlayerKeystone()
@@ -156,16 +157,20 @@ function KR:BroadcastKeystone()
         pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or ""), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LKS", string.format("%d:%d", key.mapID, key.level), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LibOpenRaid", string.format("KEY,%d,%d", key.mapID, key.level), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LOR", string.format("KEY,%d,%d", key.mapID, key.level), targetChan)
     end
 end
 
--- Request Group Keystones (KeyRoulette & LibKeystone compatible)
+-- Request Group Keystones (KeyRoulette, LibKeystone & LibOpenRaid compatible)
 function KR:RequestGroupKeystones()
     if not IsInGroup() then return end
     local targetChan = IsInRaid() and "RAID" or "PARTY"
     pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", "REQUEST", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LKS", "REQ", targetChan)
+    pcall(C_ChatInfo.SendAddonMessage, "LibOpenRaid", "REQUEST_KEY", targetChan)
+    pcall(C_ChatInfo.SendAddonMessage, "LOR", "REQ_KEY", targetChan)
 end
 
 -- Update Group Roster Data
@@ -324,9 +329,35 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                 end
             end
 
-        elseif prefix == "AstralKeys" or prefix == "Details" or prefix == "LibOpenRaid" or prefix == "MythicKeystones" then
-            if message and message:find("(%d+):(%d+)") then
-                local mID, lvl = message:match("(%d+):(%d+)")
+        elseif prefix == "LibOpenRaid" or prefix == "LibOpenRaid-1.0" or prefix == "LOR" or prefix == "LOR1" or prefix == "OpenRaid" then
+            if message == "REQUEST_KEY" or message == "REQ_KEY" or message == "QUERY" or message == "PING" then
+                KR:BroadcastKeystone()
+            else
+                local mID, lvl = message:match("KEY,(%d+),(%d+)")
+                              or message:match("MKEY,(%d+),(%d+)")
+                              or message:match("(%d+),(%d+)")
+                              or message:match("KEY:(%d+):(%d+)")
+                              or message:match("(%d+):(%d+)")
+                if mID and lvl then
+                    mID = tonumber(mID)
+                    lvl = tonumber(lvl)
+                    if mID > 0 and lvl > 0 then
+                        local dungeon = KR:GetDungeonInfo(mID)
+                        KR.groupMembers[senderName] = {
+                            mapID = mID,
+                            level = lvl,
+                            dungeonName = dungeon and dungeon.name or ("Map " .. mID),
+                            icon = dungeon and dungeon.icon or 5254320,
+                            source = "LibOpenRaid"
+                        }
+                        KR:UpdateGroupRoster()
+                    end
+                end
+            end
+
+        elseif prefix == "AstralKeys" or prefix == "Details" or prefix == "MythicKeystones" then
+            if message and (message:find("(%d+):(%d+)") or message:find("(%d+),(%d+)")) then
+                local mID, lvl = message:match("(%d+):(%d+)") or message:match("(%d+),(%d+)")
                 if mID and lvl then
                     mID = tonumber(mID)
                     lvl = tonumber(lvl)
