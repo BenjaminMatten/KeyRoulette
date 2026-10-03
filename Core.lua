@@ -158,18 +158,91 @@ function KR:SaveMemberKey(rawName, mapID, level, source)
     KeyRouletteDB.groupKeys[fullName] = keyData
 end
 
--- Universal MapID and Level Extractor (Handles tables, multi-returns, string pairs)
+-- Universal MapID and Level Extractor (Handles tables, multi-returns, string pairs, and prevents level/map swaps)
 local function ExtractMapAndLevel(res1, res2)
+    local mID, lvl
+
     if type(res1) == "table" then
-        local mID = tonumber(res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1.map_id or res1.keyID or res1.map or res1.keystoneMapID or res1.keystoneMap or res1.challengeMapId or res1[1])
-        local lvl = tonumber(res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1.key_level or res1.level_num or res1.keystoneLevel or res1.keyLvl or res1[2])
-        return mID, lvl
+        local rawMap = res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1.map_id or res1.keyID or res1.map or res1.keystoneMapID or res1.keystoneMap or res1.challengeMapId or res1.dungeon or res1.mID or res1[1]
+        local rawLvl = res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1.level_num or res1.keystoneLevel or res1.keyLvl or res1.key or res1.lvl or res1[2]
+
+        local n1 = tonumber(rawMap)
+        local n2 = tonumber(rawLvl)
+
+        if n1 and n2 then
+            if n1 > 100 and n2 <= 50 then
+                mID, lvl = n1, n2
+            elseif n2 > 100 and n1 <= 50 then
+                mID, lvl = n2, n1
+            else
+                mID, lvl = n1, n2
+            end
+        elseif n1 and n1 > 100 then
+            mID = n1
+        elseif n2 and n2 <= 50 then
+            lvl = n2
+        end
+
     elseif type(res1) == "number" and type(res2) == "number" then
-        return res1, res2
+        if res1 > 100 and res2 <= 50 then
+            mID, lvl = res1, res2
+        elseif res2 > 100 and res1 <= 50 then
+            mID, lvl = res2, res1
+        else
+            mID, lvl = res1, res2
+        end
+
     elseif type(res1) == "string" then
-        local mID, lvl = res1:match("(%d+):(%d+)") or res1:match("(%d+),(%d+)") or res1:match("(%d+)#(%d+)")
-        if mID and lvl then return tonumber(mID), tonumber(lvl) end
+        local n1, n2 = res1:match("(%d+)[:#,%s]+(%d+)")
+        if n1 and n2 then
+            n1, n2 = tonumber(n1), tonumber(n2)
+            if n1 > 100 and n2 <= 50 then
+                mID, lvl = n1, n2
+            elseif n2 > 100 and n1 <= 50 then
+                mID, lvl = n2, n1
+            else
+                mID, lvl = n1, n2
+            end
+        end
     end
+
+    if mID and lvl and mID > 0 and lvl > 0 then
+        return mID, lvl
+    end
+    return nil, nil
+end
+
+-- Helper Table Matcher for Addon DBs (EllesmereUI, KeystoneLoot, Details, etc.)
+local function CheckTableForMemberKey(tbl, searchNames)
+    if not tbl or type(tbl) ~= "table" then return nil, nil end
+
+    -- Direct key indexing (tbl["PlayerName"] or tbl["playername"])
+    for _, sName in ipairs(searchNames) do
+        if sName then
+            local entry = tbl[sName] or tbl[sName:lower()]
+            if entry then
+                local mID, lvl = ExtractMapAndLevel(entry)
+                if mID and lvl then return mID, lvl end
+            end
+        end
+    end
+
+    -- 1-level table iteration for array records ({ name = "...", map = ..., level = ... })
+    for k, v in pairs(tbl) do
+        if type(v) == "table" then
+            local sender = v.name or v.sender or v.player or v.unit or (type(k) == "string" and k)
+            if type(sender) == "string" then
+                local sShort = sender:match("([^-]+)") or sender
+                for _, sName in ipairs(searchNames) do
+                    if sName and (sender == sName or sender:lower() == sName:lower() or sShort == sName or sShort:lower() == sName:lower()) then
+                        local mID, lvl = ExtractMapAndLevel(v)
+                        if mID and lvl then return mID, lvl end
+                    end
+                end
+            end
+        end
+    end
+
     return nil, nil
 end
 
@@ -196,7 +269,25 @@ local function DeepSearchTable(tbl, searchNames, depth)
     return nil, nil
 end
 
--- Comprehensive Keystone Lookup Engine (Ultra-Fast Direct Lookups)
+-- Purge Stale RaiderIO Entries from SavedVariables and Cache
+function KR:PurgeRaiderIOData()
+    if KR.groupMembers then
+        for k, v in pairs(KR.groupMembers) do
+            if v and v.source == "RaiderIO" then
+                KR.groupMembers[k] = nil
+            end
+        end
+    end
+    if KeyRouletteDB and KeyRouletteDB.groupKeys then
+        for k, v in pairs(KeyRouletteDB.groupKeys) do
+            if v and v.source == "RaiderIO" then
+                KeyRouletteDB.groupKeys[k] = nil
+            end
+        end
+    end
+end
+
+-- Comprehensive Keystone Lookup Engine (Live Addon Sync First)
 function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
     if not name then return nil end
     local shortName = name:match("([^-]+)") or name
@@ -205,69 +296,35 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
     local guid = UnitExists(unit) and UnitGUID(unit)
     local searchNames = { fullName, shortName, name, guid }
 
-    -- 1. Check manual override
+    -- Purge any legacy RaiderIO caches
+    KR:PurgeRaiderIOData()
+
+    -- 1. Check manual user override (✏️ Edit button in UI)
     if KR.manualKeys[name] then return KR.manualKeys[name] end
     if KR.manualKeys[shortName] then return KR.manualKeys[shortName] end
     if KR.manualKeys[fullName] then return KR.manualKeys[fullName] end
 
-    -- 2. Check in-memory sync cache
-    local cached = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
-                or KR.groupMembers[name:lower()] or KR.groupMembers[shortName:lower()]
-    if cached then return cached end
-
-    -- 3. Check persistent SavedVariables DB cache
-    if KeyRouletteDB and KeyRouletteDB.groupKeys then
-        local saved = KeyRouletteDB.groupKeys[name] or KeyRouletteDB.groupKeys[shortName] or KeyRouletteDB.groupKeys[fullName]
-        if saved then
-            KR.groupMembers[name] = saved
-            return saved
-        end
-    end
-
-    -- 4. Check EllesmereUIDB.keystonePopup / EllesmereUI (Fast Direct Table Indexing)
+    -- 2. Check EllesmereUI / EUIKeysPopup / EllesmereUIDB
     if _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys then
         pcall(function()
-            local kp = (_G.EllesmereUIDB and _G.EllesmereUIDB.keystonePopup) or _G.EUIKeysPopup or _G.EllesmereUI
-            if type(kp) == "table" then
-                for _, sName in ipairs(searchNames) do
-                    if sName then
-                        local entry = kp[sName] or kp[sName:lower()]
-                        if entry then
-                            local mID, lvl = ExtractMapAndLevel(entry)
-                            if mID and lvl then
-                                KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
-                                break
-                            end
-                        end
-                    end
-                end
-                -- Shallow 1-level scan if stored as an array of player objects
-                if not KR.groupMembers[name] then
-                    for k, v in pairs(kp) do
-                        if type(v) == "table" then
-                            local sender = v.name or v.sender or v.player or (type(k) == "string" and k)
-                            if type(sender) == "string" then
-                                for _, sName in ipairs(searchNames) do
-                                    if sName and (sender == sName or sender:lower() == sName:lower() or sender:find(sName, 1, true)) then
-                                        local mID, lvl = ExtractMapAndLevel(v)
-                                        if mID and lvl then
-                                            KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
-                                            break
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
+            local eui = _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys
+            local mID, lvl
+            if _G.EllesmereUIDB and type(_G.EllesmereUIDB.keystonePopup) == "table" then
+                mID, lvl = CheckTableForMemberKey(_G.EllesmereUIDB.keystonePopup, searchNames)
+            end
+            if not mID and type(eui) == "table" then
+                mID, lvl = CheckTableForMemberKey(eui, searchNames)
+            end
+            if mID and lvl then
+                KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
             end
         end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source and KR.groupMembers[name].source:find("Ellesmere") then
+        if KR.groupMembers[name] and KR.groupMembers[name].source == "EllesmereUI" then
             return KR.groupMembers[name]
         end
     end
 
-    -- 5. Check LibOpenRaid (Fast direct API methods)
+    -- 3. Check LibOpenRaid
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor then
         pcall(function()
@@ -298,32 +355,26 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
                 KR:SaveMemberKey(name, mID, lvl, "LibOpenRaid")
             end
         end)
-        if KR.groupMembers[name] then return KR.groupMembers[name] end
+        if KR.groupMembers[name] and KR.groupMembers[name].source == "LibOpenRaid" then
+            return KR.groupMembers[name]
+        end
     end
 
-    -- 6. Check KeystoneLoot (Fast Direct Table Lookup)
+    -- 4. Check KeystoneLoot
     if _G.KeystoneLootDB or _G.KeystoneLootAPI or _G.KeystoneLootCharDB then
         pcall(function()
             local kl = _G.KeystoneLootCharDB or _G.KeystoneLootDB or _G.KeystoneLootAPI
-            if type(kl) == "table" then
-                for _, sName in ipairs(searchNames) do
-                    if sName then
-                        local entry = kl[sName] or (kl.characters and kl.characters[sName]) or (kl.keys and kl.keys[sName])
-                        if entry then
-                            local mID, lvl = ExtractMapAndLevel(entry)
-                            if mID and lvl then
-                                KR:SaveMemberKey(name, mID, lvl, "KeystoneLoot")
-                                break
-                            end
-                        end
-                    end
-                end
+            local mID, lvl = CheckTableForMemberKey(kl, searchNames)
+            if mID and lvl then
+                KR:SaveMemberKey(name, mID, lvl, "KeystoneLoot")
             end
         end)
-        if KR.groupMembers[name] then return KR.groupMembers[name] end
+        if KR.groupMembers[name] and KR.groupMembers[name].source == "KeystoneLoot" then
+            return KR.groupMembers[name]
+        end
     end
 
-    -- 7. Check LibTomoKeystoneSync (Fast direct API calls)
+    -- 5. Check LibTomoKeystoneSync
     local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync or _G.TomoKeys
     if tomo then
@@ -339,10 +390,12 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
                 KR:SaveMemberKey(name, mID, lvl, "LibTomoKeystoneSync")
             end
         end)
-        if KR.groupMembers[name] then return KR.groupMembers[name] end
+        if KR.groupMembers[name] and KR.groupMembers[name].source == "LibTomoKeystoneSync" then
+            return KR.groupMembers[name]
+        end
     end
 
-    -- 8. Check LibOpenKeystone (Fast direct API calls)
+    -- 6. Check LibOpenKeystone
     local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
     if lok then
         pcall(function()
@@ -355,10 +408,12 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
                 KR:SaveMemberKey(name, mID, lvl, "LibOpenKeystone")
             end
         end)
-        if KR.groupMembers[name] then return KR.groupMembers[name] end
+        if KR.groupMembers[name] and KR.groupMembers[name].source == "LibOpenKeystone" then
+            return KR.groupMembers[name]
+        end
     end
 
-    -- 9. Check Details! & AstralKeys (Fast direct table index)
+    -- 7. Check Details & AstralKeys
     if _G.Details and _G.Details.Keystones then
         pcall(function()
             local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
@@ -367,7 +422,9 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
                 KR:SaveMemberKey(name, mID, lvl, "Details")
             end
         end)
-        if KR.groupMembers[name] then return KR.groupMembers[name] end
+        if KR.groupMembers[name] and KR.groupMembers[name].source == "Details" then
+            return KR.groupMembers[name]
+        end
     end
 
     if _G.AstralKeys then
@@ -381,10 +438,28 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
                 KR:SaveMemberKey(name, mID, lvl, "AstralKeys")
             end
         end)
-        if KR.groupMembers[name] then return KR.groupMembers[name] end
+        if KR.groupMembers[name] and KR.groupMembers[name].source == "AstralKeys" then
+            return KR.groupMembers[name]
+        end
     end
 
-    -- 10. Deep Recursive Searcher (ONLY executed during explicit /kr resync or /kr debug)
+    -- 8. Check in-memory sync cache (non-RaiderIO)
+    local cached = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+                or KR.groupMembers[name:lower()] or KR.groupMembers[shortName:lower()]
+    if cached and cached.source ~= "RaiderIO" then
+        return cached
+    end
+
+    -- 9. Check persistent SavedVariables DB cache (non-RaiderIO)
+    if KeyRouletteDB and KeyRouletteDB.groupKeys then
+        local saved = KeyRouletteDB.groupKeys[name] or KeyRouletteDB.groupKeys[shortName] or KeyRouletteDB.groupKeys[fullName]
+        if saved and saved.source ~= "RaiderIO" then
+            KR.groupMembers[name] = saved
+            return saved
+        end
+    end
+
+    -- 10. Deep Global Recursive Searcher (ONLY executed during explicit /kr resync or /kr debug)
     if allowDeepSearch then
         if _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup then
             pcall(function()
@@ -394,11 +469,11 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
                     KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
                 end
             end)
-            if KR.groupMembers[name] then return KR.groupMembers[name] end
+            if KR.groupMembers[name] and KR.groupMembers[name].source == "EllesmereUI" then return KR.groupMembers[name] end
         end
 
         for gName, gVal in pairs(_G) do
-            if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("Keystone")) and type(gVal) == "table" then
+            if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("Keystone")) and type(gVal) == "table" and gName ~= "RaiderIO" then
                 pcall(function()
                     local mID, lvl = DeepSearchTable(gVal, searchNames, 0)
                     if mID and lvl then
@@ -410,7 +485,11 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         end
     end
 
-    return KR.groupMembers[name] or KR.groupMembers[shortName]
+    local finalKey = KR.groupMembers[name] or KR.groupMembers[shortName]
+    if finalKey and finalKey.source == "RaiderIO" then
+        return nil
+    end
+    return finalKey
 end
 
 -- Diagnostic Debug Command (Saves to SavedVariables & Triggers Copy Window)
@@ -1000,7 +1079,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                 end
             end
 
-        elseif prefix == "AstralKeys" or prefix == "Details" or prefix == "MythicKeystones" or prefix == "RaiderIO" then
+        elseif prefix == "AstralKeys" or prefix == "Details" or prefix == "MythicKeystones" then
             if message and (message:find("(%d+):(%d+)") or message:find("(%d+),(%d+)")) then
                 local mID, lvl = message:match("(%d+):(%d+)") or message:match("(%d+),(%d+)")
                 if mID and lvl then
