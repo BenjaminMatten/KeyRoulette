@@ -215,6 +215,9 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
         pcall(C_ChatInfo.RegisterAddonMessagePrefix, "KeyRoulette")
         KR:BroadcastKeystone()
         KR:UpdateGroupRoster()
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r Addon Loaded! Type |cffffd700/kr|r or |cffffd700/keyroulette|r to open.")
+        end
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         KR:BroadcastKeystone()
