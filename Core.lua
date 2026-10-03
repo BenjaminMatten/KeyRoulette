@@ -159,13 +159,13 @@ end
 -- Universal MapID and Level Extractor (Handles tables, multi-returns, string pairs)
 local function ExtractMapAndLevel(res1, res2)
     if type(res1) == "table" then
-        local mID = tonumber(res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1[1])
-        local lvl = tonumber(res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1[2])
+        local mID = tonumber(res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1.map_id or res1.keyID or res1[1])
+        local lvl = tonumber(res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1.key_level or res1[2])
         return mID, lvl
     elseif type(res1) == "number" and type(res2) == "number" then
         return res1, res2
     elseif type(res1) == "string" then
-        local mID, lvl = res1:match("(%d+):(%d+)") or res1:match("(%d+),(%d+)")
+        local mID, lvl = res1:match("(%d+):(%d+)") or res1:match("(%d+),(%d+)") or res1:match("(%d+)#(%d+)")
         if mID and lvl then return tonumber(mID), tonumber(lvl) end
     end
     return nil, nil
@@ -173,20 +173,20 @@ end
 
 -- Deep Global Table Recursive Searcher (Finds keystone mapID + level for player name in any table)
 local function DeepSearchTable(tbl, searchNames, depth)
-    if not tbl or type(tbl) ~= "table" or (depth and depth > 3) then return nil, nil end
+    if not tbl or type(tbl) ~= "table" or (depth and depth > 4) then return nil, nil end
     depth = (depth or 0) + 1
 
     for key, val in pairs(tbl) do
         if type(key) == "string" then
             for _, sName in ipairs(searchNames) do
-                if key == sName or key:lower() == sName:lower() then
+                if key == sName or key:lower() == sName:lower() or key:find(sName, 1, true) then
                     local mID, lvl = ExtractMapAndLevel(val)
                     if mID and lvl then return mID, lvl end
                 end
             end
         end
 
-        if type(val) == "table" and key ~= "_G" and key ~= "KR" and key ~= "KeyRoulette" then
+        if type(val) == "table" and key ~= "_G" and key ~= "KR" and key ~= "KeyRoulette" and key ~= "UIParent" and key ~= "WorldFrame" then
             local mID, lvl = DeepSearchTable(val, searchNames, depth)
             if mID and lvl then return mID, lvl end
         end
@@ -322,9 +322,9 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 10. Deep Global Scanner for EllesmereUI, EUI, Tomo, and ElvUI tables
+    -- 10. Deep Global Scanner for EllesmereUI, TustUI, EUI, KeyFrame, ElvUI, Cell, OmniCD, etc.
     for gName, gVal in pairs(_G) do
-        if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("ElvUI") or gName:find("Keystone")) and type(gVal) == "table" then
+        if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("Tust") or gName:find("EUI") or gName:find("Tomo") or gName:find("Elv") or gName:find("Key") or gName:find("Cell") or gName:find("Omni")) and type(gVal) == "table" then
             pcall(function()
                 local mID, lvl = DeepSearchTable(gVal, searchNames, 0)
                 if mID and lvl then
