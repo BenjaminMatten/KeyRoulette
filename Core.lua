@@ -160,7 +160,7 @@ function KR:SaveMemberKey(rawName, mapID, level, source)
     KeyRouletteDB.groupKeys[fullName] = keyData
 end
 
--- Comprehensive Keystone Lookup Engine (EllesmereUI, LibOpenKeystone, LibTomoKeystoneSync, LibOpenRaid, Details!, AstralKeys, Tooltip Parser)
+-- Comprehensive Keystone Lookup Engine (EllesmereUI Deep Global Scanner, LibOpenKeystone, LibTomoKeystoneSync, LibOpenRaid, Details!, AstralKeys, Tooltip Parser)
 function KR:FindPartyMemberKey(unit, name)
     if not name then return nil end
     local shortName = name:match("([^-]+)") or name
@@ -186,60 +186,27 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 4. Check EllesmereUI & EllesmereUIDB Namespace (EllesmereUI Native Storage)
-    local eui = _G.EllesmereUI or _G.Ellesmere
-    if eui then
-        local eKey
-        pcall(function()
-            if eui.GetKeystone then
-                eKey = eui:GetKeystone(unit) or eui:GetKeystone(shortName) or eui:GetKeystone(fullName)
-            end
-            if not eKey and eui.GetKeystoneInfo then
-                eKey = eui:GetKeystoneInfo(unit) or eui:GetKeystoneInfo(shortName) or eui:GetKeystoneInfo(fullName)
-            end
-            if not eKey and eui.keystones then
-                eKey = eui.keystones[fullName] or eui.keystones[shortName] or eui.keystones[unit]
-            end
-            if not eKey and eui.partyKeys then
-                eKey = eui.partyKeys[fullName] or eui.partyKeys[shortName] or eui.partyKeys[unit]
-            end
-            if not eKey and eui.db and eui.db.keystones then
-                eKey = eui.db.keystones[fullName] or eui.db.keystones[shortName]
-            end
-        end)
-        if eKey then
-            local mapID = tonumber(eKey.mapID or eKey.challengeMapID or eKey.dungeonID or (type(eKey) == "table" and eKey[1]))
-            local level = tonumber(eKey.level or eKey.keyLevel or (type(eKey) == "table" and eKey[2]))
-            if mapID and mapID > 0 and level and level > 0 then
-                KR:SaveMemberKey(name, mapID, level, "EllesmereUI")
-                return KR.groupMembers[name]
-            end
-        end
-    end
+    -- 4. Deep Global Scanner for EllesmereUI, EUI, Tomo, and ElvUI tables
+    for gName, gVal in pairs(_G) do
+        if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("ElvUI")) and type(gVal) == "table" then
+            pcall(function()
+                local kData = gVal[fullName] or gVal[shortName] or gVal[name]
+                if not kData and gVal.keystones then kData = gVal.keystones[fullName] or gVal.keystones[shortName] end
+                if not kData and gVal.keys then kData = gVal.keys[fullName] or gVal.keys[shortName] end
+                if not kData and gVal.db and gVal.db.keystones then kData = gVal.db.keystones[fullName] or gVal.db.keystones[shortName] end
+                if not kData and gVal.db and gVal.db.keys then kData = gVal.db.keys[fullName] or gVal.db.keys[shortName] end
 
-    if _G.EllesmereUIDB then
-        local edb = _G.EllesmereUIDB
-        local eKey
-        pcall(function()
-            if edb.keystones then
-                eKey = edb.keystones[fullName] or edb.keystones[shortName] or edb.keystones[name]
-            end
-            if not eKey and edb.keys then
-                eKey = edb.keys[fullName] or edb.keys[shortName] or edb.keys[name]
-            end
-            if not eKey and edb.partyKeys then
-                eKey = edb.partyKeys[fullName] or edb.partyKeys[shortName] or edb.partyKeys[name]
-            end
-        end)
-        if eKey then
-            local mapID = tonumber(eKey.mapID or eKey.challengeMapID or eKey.dungeonID or (type(eKey) == "table" and eKey[1]))
-            local level = tonumber(eKey.level or eKey.keyLevel or (type(eKey) == "table" and eKey[2]))
-            if mapID and mapID > 0 and level and level > 0 then
-                KR:SaveMemberKey(name, mapID, level, "EllesmereUIDB")
-                return KR.groupMembers[name]
-            end
+                if kData then
+                    local mapID = tonumber(kData.mapID or kData.challengeMapID or kData.dungeonID or (type(kData) == "table" and kData[1]))
+                    local level = tonumber(kData.level or kData.keyLevel or (type(kData) == "table" and kData[2]))
+                    if mapID and mapID > 0 and level and level > 0 then
+                        KR:SaveMemberKey(name, mapID, level, gName)
+                    end
+                end
+            end)
         end
     end
+    if KR.groupMembers[name] then return KR.groupMembers[name] end
 
     -- 5. Check LibOpenKeystone
     local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
@@ -382,6 +349,47 @@ function KR:FindPartyMemberKey(unit, name)
     end
 
     return KR.groupMembers[name] or KR.groupMembers[shortName]
+end
+
+-- Diagnostic Debug Command
+function KR:RunDebug()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc=== KEY ROULETTE DEBUG ===|r")
+    DEFAULT_CHAT_FRAME:AddMessage("In Group: " .. tostring(IsInGroup()) .. " | Num Members: " .. tostring(GetNumGroupMembers()))
+    
+    -- Check globals
+    DEFAULT_CHAT_FRAME:AddMessage("EllesmereUI: " .. tostring(_G.EllesmereUI ~= nil) .. " | EllesmereUIDB: " .. tostring(_G.EllesmereUIDB ~= nil))
+    DEFAULT_CHAT_FRAME:AddMessage("Details: " .. tostring(_G.Details ~= nil) .. " | AstralKeys: " .. tostring(_G.AstralKeys ~= nil))
+    DEFAULT_CHAT_FRAME:AddMessage("LibOpenRaid: " .. tostring(LibStub and LibStub("LibOpenRaid-1.0", true) ~= nil))
+    DEFAULT_CHAT_FRAME:AddMessage("LibTomo: " .. tostring(LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)) ~= nil))
+    DEFAULT_CHAT_FRAME:AddMessage("LibOpenKeystone: " .. tostring(LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true)) ~= nil))
+
+    -- Dump cached keys
+    local count = 0
+    if KR.groupMembers then
+        for k, v in pairs(KR.groupMembers) do
+            count = count + 1
+            DEFAULT_CHAT_FRAME:AddMessage("Cached Key [" .. tostring(k) .. "]: " .. tostring(v.dungeonName) .. " +" .. tostring(v.level) .. " (" .. tostring(v.source) .. ")")
+        end
+    end
+    if count == 0 then
+        DEFAULT_CHAT_FRAME:AddMessage("No cached keys in memory.")
+    end
+
+    -- Dump Party Member 1-4
+    if IsInGroup() then
+        local num = GetNumGroupMembers()
+        for i = 1, (num - 1) do
+            local unit = "party" .. i
+            if UnitExists(unit) then
+                local name = UnitName(unit)
+                local key = KR:FindPartyMemberKey(unit, name)
+                DEFAULT_CHAT_FRAME:AddMessage("Party Member " .. i .. " (" .. tostring(name) .. "): " .. (key and ("+" .. key.level .. " " .. key.dungeonName .. " [" .. key.source .. "]") or "No Key Detected"))
+            end
+        end
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("Not in group (Solo).")
+    end
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc===========================|r")
 end
 
 -- Scan Player Bag for Mythic+ Keystone
@@ -788,6 +796,10 @@ SlashCmdList["KEYROULETTE"] = function(msg)
     elseif msg == "resync" or msg == "sync" then
         if KR.ResyncAllKeys then
             KR:ResyncAllKeys()
+        end
+    elseif msg == "debug" then
+        if KR.RunDebug then
+            KR:RunDebug()
         end
     else
         local ok, err = pcall(function() KR:ToggleUI() end)
