@@ -26,6 +26,7 @@ end
 SafeRegisterEvent("ADDON_LOADED")
 SafeRegisterEvent("PLAYER_ENTERING_WORLD")
 SafeRegisterEvent("GROUP_ROSTER_UPDATE")
+SafeRegisterEvent("GUILD_ROSTER_UPDATE")
 SafeRegisterEvent("BAG_UPDATE_DELAYED")
 SafeRegisterEvent("PLAYER_REGEN_DISABLED")
 SafeRegisterEvent("PLAYER_REGEN_ENABLED")
@@ -34,6 +35,8 @@ SafeRegisterEvent("CHAT_MSG_PARTY")
 SafeRegisterEvent("CHAT_MSG_PARTY_LEADER")
 SafeRegisterEvent("CHAT_MSG_RAID")
 SafeRegisterEvent("CHAT_MSG_RAID_LEADER")
+SafeRegisterEvent("CHAT_MSG_GUILD")
+SafeRegisterEvent("CHAT_MSG_OFFICER")
 SafeRegisterEvent("CHAT_MSG_SAY")
 SafeRegisterEvent("CHAT_MSG_INSTANCE_CHAT")
 
@@ -443,14 +446,46 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         end
     end
 
-    -- 8. Check in-memory sync cache (non-RaiderIO)
+    -- 8. Tooltip Unit Scanner (For Standard UI players without sync addons)
+    if C_TooltipInfo and C_TooltipInfo.GetUnit then
+        pcall(function()
+            local data = C_TooltipInfo.GetUnit(unit)
+            if data and data.lines then
+                for _, line in ipairs(data.lines) do
+                    if line.leftText then
+                        local mID, lvl = ExtractMapAndLevel(line.leftText)
+                        if mID and lvl then
+                            KR:SaveMemberKey(name, mID, lvl, "Tooltip")
+                        else
+                            local lvlText, dName = line.leftText:match("%+(%d+)%s+([^%]+)]?")
+                            if not lvlText then dName, lvlText = line.leftText:match("([^%+%[b]+)%s*%+(%d+)") end
+                            if lvlText and dName then
+                                local l = tonumber(lvlText)
+                                if l and l > 0 then
+                                    KR:SaveMemberKey(name, 507, l, "Tooltip")
+                                    if KR.groupMembers[name] then
+                                        KR.groupMembers[name].dungeonName = dName:gsub("^%s*(.-)%s*$", "%1")
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+        if KR.groupMembers[name] and KR.groupMembers[name].source == "Tooltip" then
+            return KR.groupMembers[name]
+        end
+    end
+
+    -- 9. Check in-memory sync cache (non-RaiderIO)
     local cached = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
                 or KR.groupMembers[name:lower()] or KR.groupMembers[shortName:lower()]
     if cached and cached.source ~= "RaiderIO" then
         return cached
     end
 
-    -- 9. Check persistent SavedVariables DB cache (non-RaiderIO)
+    -- 10. Check persistent SavedVariables DB cache (non-RaiderIO)
     if KeyRouletteDB and KeyRouletteDB.groupKeys then
         local saved = KeyRouletteDB.groupKeys[name] or KeyRouletteDB.groupKeys[shortName] or KeyRouletteDB.groupKeys[fullName]
         if saved and saved.source ~= "RaiderIO" then
@@ -739,14 +774,64 @@ function KR:ScanPlayerKeystone()
     return KR.playerKey
 end
 
--- Broadcast Self Keystone to Party
+-- Scan Guild Roster Notes for Keystone Info
+function KR:ScanGuildRosterKeys()
+    if not IsInGuild() then return end
+    pcall(function()
+        if C_GuildInfo and C_GuildInfo.GuildRoster then
+            C_GuildInfo.GuildRoster()
+        end
+        local numTotal = GetNumGuildMembers() or 0
+        for i = 1, numTotal do
+            local name, rank, rankIndex, level, class, zone, note, officerNote = GetGuildRosterInfo(i)
+            if name then
+                local shortName = name:match("([^-]+)") or name
+                local combinedNote = (note or "") .. " " .. (officerNote or "")
+                if combinedNote and combinedNote ~= "" then
+                    local mID, lvl = combinedNote:match("keystone:%d+:(%d+):(%d+)")
+                                  or combinedNote:match("(%d+)[:#,%s]+(%d+)")
+                    if mID and lvl then
+                        mID, lvl = tonumber(mID), tonumber(lvl)
+                        if mID and lvl and mID > 0 and lvl > 0 then
+                            KR:SaveMemberKey(shortName, mID, lvl, "Guild Note")
+                        end
+                    else
+                        local lvlText, dName = combinedNote:match("%+(%d+)%s+([^%]+)]?")
+                        if not lvlText then dName, lvlText = combinedNote:match("([^%+%[b]+)%s*%+(%d+)") end
+                        if lvlText and dName then
+                            local l = tonumber(lvlText)
+                            if l and l > 0 then
+                                KR:SaveMemberKey(shortName, 507, l, "Guild Note")
+                                if KR.groupMembers[shortName] then
+                                    KR.groupMembers[shortName].dungeonName = dName:gsub("^%s*(.-)%s*$", "%1")
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- Broadcast Self Keystone to Party & Guild
 function KR:BroadcastKeystone()
-    if InCombatLockdown() or KR.inCombat or not IsInGroup() then return end
+    if InCombatLockdown() or KR.inCombat then return end
     local key = KR:ScanPlayerKeystone()
-    if key then
-        local targetChan = IsInRaid() and "RAID" or "PARTY"
+    if not key then return end
+
+    local channels = {}
+    if IsInGroup() then
+        table.insert(channels, IsInRaid() and "RAID" or "PARTY")
+    end
+    if IsInGuild() then
+        table.insert(channels, "GUILD")
+    end
+
+    for _, targetChan in ipairs(channels) do
         pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or ""), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "EllesmereUI", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "Ellesmere", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LibOpenKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LTKS", string.format("%d:%d", key.mapID, key.level), targetChan)
@@ -757,10 +842,17 @@ function KR:BroadcastKeystone()
     end
 end
 
--- Request Group Keystones
+-- Request Group & Guild Keystones
 function KR:RequestGroupKeystones()
-    if InCombatLockdown() or KR.inCombat or not IsInGroup() then return end
-    local targetChan = IsInRaid() and "RAID" or "PARTY"
+    if InCombatLockdown() or KR.inCombat then return end
+
+    local channels = {}
+    if IsInGroup() then
+        table.insert(channels, IsInRaid() and "RAID" or "PARTY")
+    end
+    if IsInGuild() then
+        table.insert(channels, "GUILD")
+    end
 
     -- Invoke EllesmereUI functions
     local eui = _G.EllesmereUI or _G.Ellesmere
@@ -812,15 +904,31 @@ function KR:RequestGroupKeystones()
     end
 
     -- Send network pings
-    pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", targetChan)
-    pcall(C_ChatInfo.SendAddonMessage, "EllesmereUI", "REQUEST", targetChan)
-    pcall(C_ChatInfo.SendAddonMessage, "LibOpenKeystone", "REQUEST", targetChan)
-    pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", "REQUEST", targetChan)
-    pcall(C_ChatInfo.SendAddonMessage, "LTKS", "REQ", targetChan)
-    pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", "REQUEST", targetChan)
-    pcall(C_ChatInfo.SendAddonMessage, "LKS", "REQ", targetChan)
-    pcall(C_ChatInfo.SendAddonMessage, "LibOpenRaid", "REQUEST_KEY", targetChan)
-    pcall(C_ChatInfo.SendAddonMessage, "LOR", "REQ_KEY", targetChan)
+    for _, targetChan in ipairs(channels) do
+        pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "EllesmereUI", "REQUEST", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "Ellesmere", "REQUEST", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LibOpenKeystone", "REQUEST", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", "REQUEST", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LTKS", "REQ", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", "REQUEST", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LKS", "REQ", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LibOpenRaid", "REQUEST_KEY", targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LOR", "REQ_KEY", targetChan)
+    end
+end
+
+-- Ask Party for Keys Chat Prompt (For standard UI players)
+function KR:AskPartyForKeys()
+    local msg = "🎲 [Key Roulette]: Please link your Mythic+ keystone in chat!"
+    if IsInGroup() then
+        SendChatMessage(msg, IsInRaid() and "RAID" or "PARTY")
+    else
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r " .. msg)
+        end
+    end
+    KR:RequestGroupKeystones()
 end
 
 -- Manual Resync All Keys Action
@@ -961,10 +1069,11 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r Addon Loaded! Type |cffffd700/kr|r or |cffffd700/keyroulette|r to open.")
         end
 
-    elseif event == "GROUP_ROSTER_UPDATE" then
+    elseif event == "GROUP_ROSTER_UPDATE" or event == "GUILD_ROSTER_UPDATE" then
         local now = GetTime()
         if not KR.lastRosterUpdate or (now - KR.lastRosterUpdate) > 2 then
             KR.lastRosterUpdate = now
+            KR:ScanGuildRosterKeys()
             KR:BroadcastKeystone()
             KR:RequestGroupKeystones()
             KR:UpdateGroupRoster()

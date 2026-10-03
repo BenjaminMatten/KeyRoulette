@@ -151,6 +151,19 @@ local function CreateMainFrame()
     end)
     AddTooltip(refreshBtn, "Quick Sync", "Sends network queries across all supported addon channels (EllesmereUI, RaiderIO, LibOpenRaid, LibTomo, LibKeystone) to fetch party keystones.")
 
+    -- Ask Party for Keys Button (For Standard UI Players)
+    local askBtn = CreateFrame("Button", nil, mainFrame, template)
+    askBtn:SetSize(78, 22)
+    askBtn:SetPoint("RIGHT", refreshBtn, "LEFT", -6, 0)
+    ApplyStyle(askBtn, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
+    local askText = askBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    askText:SetPoint("CENTER", askBtn, "CENTER", 0, 0)
+    askText:SetText("📢 Ask Keys")
+    askBtn:SetScript("OnClick", function()
+        if KR.AskPartyForKeys then KR:AskPartyForKeys() end
+    end)
+    AddTooltip(askBtn, "Ask Party for Keys", "Sends a prompt in Party/Raid chat asking players with standard UI to link their keystones.", "Key Roulette auto-parses linked keystones in real time.")
+
     -- Member Cards Scroll/List Container
     local listContainer = CreateFrame("Frame", nil, mainFrame, template)
     listContainer:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 14, -45)
