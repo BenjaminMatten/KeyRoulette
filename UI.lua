@@ -113,9 +113,12 @@ local function CreateMainFrame()
     refreshBtn:SetNormalFontObject("GameFontHighlight")
     refreshBtn:SetText("🔄")
     refreshBtn:SetScript("OnClick", function()
-        if KR.RequestGroupKeystones then KR:RequestGroupKeystones() end
-        if KR.UpdateGroupRoster then KR:UpdateGroupRoster() end
-        pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+        if KR.ResyncAllKeys then
+            KR:ResyncAllKeys()
+        else
+            if KR.RequestGroupKeystones then KR:RequestGroupKeystones() end
+            if KR.UpdateGroupRoster then KR:UpdateGroupRoster() end
+        end
     end)
 
     -- Member Cards Scroll/List Container
@@ -197,10 +200,31 @@ local function CreateMainFrame()
     autoText:SetPoint("RIGHT", autoCheck, "LEFT", -2, 0)
     autoText:SetText("Auto-Chat")
 
+    -- Resync Keys Button
+    local resyncBtn = CreateFrame("Button", nil, mainFrame, template)
+    resyncBtn:SetSize(110, 40)
+    resyncBtn:SetPoint("BOTTOMLEFT", mainFrame, "BOTTOMLEFT", 14, 14)
+    ApplyStyle(resyncBtn, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
+
+    local resyncText = resyncBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    resyncText:SetPoint("CENTER", resyncBtn, "CENTER", 0, 0)
+    resyncText:SetText("🔄 Resync")
+    resyncBtn.text = resyncText
+
+    resyncBtn:SetScript("OnEnter", function(self)
+        ApplyStyle(self, 0.20, 0.20, 0.26, 1, 0.4, 0.4, 0.45, 1)
+    end)
+    resyncBtn:SetScript("OnLeave", function(self)
+        ApplyStyle(self, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
+    end)
+    resyncBtn:SetScript("OnClick", function()
+        if KR.ResyncAllKeys then KR:ResyncAllKeys() end
+    end)
+
     -- Big Spin Action Button
     local spinBtn = CreateFrame("Button", nil, mainFrame, template)
-    spinBtn:SetSize(392, 40)
-    spinBtn:SetPoint("BOTTOM", mainFrame, "BOTTOM", 0, 14)
+    spinBtn:SetSize(274, 40)
+    spinBtn:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -14, 14)
     ApplyStyle(spinBtn, pr * 0.25, pg * 0.25, pb * 0.25, 0.95, pr, pg, pb, 1)
 
     local spinText = spinBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
@@ -219,6 +243,7 @@ local function CreateMainFrame()
     end)
 
     mainFrame.spinBtn = spinBtn
+    mainFrame.resyncBtn = resyncBtn
     KR.UIFrame = mainFrame
     return mainFrame
 end

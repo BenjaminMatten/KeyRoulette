@@ -32,11 +32,12 @@ SafeRegisterEvent("CHAT_MSG_PARTY_LEADER")
 SafeRegisterEvent("CHAT_MSG_RAID")
 SafeRegisterEvent("CHAT_MSG_RAID_LEADER")
 
--- Register Popular, LibKeystone & LibOpenRaid Addon Channel Prefixes
+-- Register Popular, LibTomoKeystoneSync, LibKeystone & LibOpenRaid Addon Channel Prefixes
 local function RegisterAddonPrefixes()
     local prefixes = {
-        "KeyRoulette", "LibKeystone", "LibKeystone-1.0", "LKS", "LKS1",
-        "LibDungeonKeys-1.0", "LibOpenRaid", "LibOpenRaid-1.0", "LOR", "LOR1", "OpenRaid",
+        "KeyRoulette", "LibTomoKeystoneSync", "LibTomoKeystoneSync-1.0", "TomoKeystoneSync", "TomoKeys", "LTKS",
+        "LibKeystone", "LibKeystone-1.0", "LKS", "LKS1", "LibDungeonKeys-1.0",
+        "LibOpenRaid", "LibOpenRaid-1.0", "LOR", "LOR1", "OpenRaid",
         "AstralKeys", "Details", "MythicKeystones"
     }
     for _, p in ipairs(prefixes) do
@@ -117,7 +118,7 @@ function KR:SaveMemberKey(rawName, mapID, level, source)
     KR.groupMembers[shortName:lower()] = keyData
 end
 
--- Comprehensive Keystone Lookup Engine (EllesmereUI, LibOpenRaid, Details!, AstralKeys, Addon Sync)
+-- Comprehensive Keystone Lookup Engine (LibTomoKeystoneSync, EllesmereUI, LibOpenRaid, Details!, AstralKeys, Addon Sync)
 function KR:FindPartyMemberKey(unit, name)
     if not name then return nil end
     local shortName = name:match("([^-]+)") or name
@@ -134,7 +135,52 @@ function KR:FindPartyMemberKey(unit, name)
                 or KR.groupMembers[name:lower()] or KR.groupMembers[shortName:lower()]
     if cached then return cached end
 
-    -- 3. Direct LibOpenRaid Inspection (Used by EllesmereUI, ElvUI, OmniCD)
+    -- 3. Check LibTomoKeystoneSync (EllesmereUI Native Library!)
+    local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
+              or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync or _G.TomoKeys
+    if tomo then
+        local tKey
+        pcall(function()
+            if tomo.GetKeystone then
+                tKey = tomo:GetKeystone(unit) or tomo:GetKeystone(shortName) or tomo:GetKeystone(fullName)
+            end
+            if not tKey and tomo.GetKeystoneInfo then
+                tKey = tomo:GetKeystoneInfo(unit) or tomo:GetKeystoneInfo(shortName) or tomo:GetKeystoneInfo(fullName)
+            end
+            if not tKey and tomo.GetPlayerKeystone then
+                tKey = tomo:GetPlayerKeystone(unit) or tomo:GetPlayerKeystone(shortName) or tomo:GetPlayerKeystone(fullName)
+            end
+            if not tKey and tomo.GetKey then
+                tKey = tomo:GetKey(unit) or tomo:GetKey(shortName) or tomo:GetKey(fullName)
+            end
+            if not tKey and tomo.keys then
+                tKey = tomo.keys[fullName] or tomo.keys[shortName] or tomo.keys[unit] or tomo.keys[shortName:lower()]
+            end
+            if not tKey and tomo.keystones then
+                tKey = tomo.keystones[fullName] or tomo.keystones[shortName] or tomo.keystones[unit]
+            end
+            if not tKey and tomo.db then
+                tKey = tomo.db[fullName] or tomo.db[shortName] or tomo.db[unit]
+            end
+        end)
+
+        if tKey then
+            local mapID = tonumber(tKey.mapID or tKey.challengeMapID or tKey.dungeonID or tKey.dungeon_id or (type(tKey) == "table" and tKey[1]))
+            local level = tonumber(tKey.level or tKey.keyLevel or tKey.key_level or tKey.levelNumber or (type(tKey) == "table" and tKey[2]))
+            if mapID and mapID > 0 and level and level > 0 then
+                local dungeon = KR:GetDungeonInfo(mapID)
+                return {
+                    mapID = mapID,
+                    level = level,
+                    dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
+                    icon = dungeon and dungeon.icon or 5254320,
+                    source = "LibTomoKeystoneSync"
+                }
+            end
+        end
+    end
+
+    -- 4. Direct LibOpenRaid Inspection (Used by ElvUI, OmniCD)
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor then
         local kInfo
@@ -166,7 +212,7 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 4. Direct Details! KeyLList Inspection
+    -- 5. Direct Details! KeyLList Inspection
     if _G.Details and _G.Details.Keystones then
         local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
         if dKey then
@@ -185,7 +231,7 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 5. Direct AstralKeys Inspection
+    -- 6. Direct AstralKeys Inspection
     if _G.AstralKeys then
         local aKey
         pcall(function()
@@ -268,13 +314,15 @@ function KR:ScanPlayerKeystone()
     return KR.playerKey
 end
 
--- Broadcast Self Keystone to Party
+-- Broadcast Self Keystone to Party (KeyRoulette, LibTomoKeystoneSync, LibKeystone & LibOpenRaid compatible)
 function KR:BroadcastKeystone()
     if not IsInGroup() then return end
     local key = KR:ScanPlayerKeystone()
     if key then
         local targetChan = IsInRaid() and "RAID" or "PARTY"
         pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or ""), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LTKS", string.format("%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LKS", string.format("%d:%d", key.mapID, key.level), targetChan)
         pcall(C_ChatInfo.SendAddonMessage, "LibOpenRaid", string.format("KEY,%d,%d", key.mapID, key.level), targetChan)
@@ -287,10 +335,26 @@ function KR:RequestGroupKeystones()
     if not IsInGroup() then return end
     local targetChan = IsInRaid() and "RAID" or "PARTY"
     pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", targetChan)
+    pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", "REQUEST", targetChan)
+    pcall(C_ChatInfo.SendAddonMessage, "LTKS", "REQ", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", "REQUEST", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LKS", "REQ", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LibOpenRaid", "REQUEST_KEY", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LOR", "REQ_KEY", targetChan)
+end
+
+-- Manual Resync All Keys Action
+function KR:ResyncAllKeys()
+    KR.groupMembers = {}
+    KR:ScanPlayerKeystone()
+    KR:RequestGroupKeystones()
+    KR:BroadcastKeystone()
+    KR:UpdateGroupRoster()
+
+    if KR.UIFrame and KR.UIFrame.banner then
+        KR.UIFrame.banner.text:SetText("|cff00ffcc🔄 Resynced all group keys!|r")
+    end
+    pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
 end
 
 -- Update Group Roster Data
@@ -406,6 +470,21 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                 end
             end
 
+        elseif prefix == "LibTomoKeystoneSync" or prefix == "LibTomoKeystoneSync-1.0" or prefix == "TomoKeystoneSync" or prefix == "TomoKeys" or prefix == "LTKS" then
+            if message == "REQUEST" or message == "REQ" or message == "PING" or message == "QUERY" then
+                KR:BroadcastKeystone()
+            else
+                local mID, lvl = message:match("KEY:(%d+):(%d+)")
+                              or message:match("KEY,(%d+),(%d+)")
+                              or message:match("(%d+):(%d+)")
+                              or message:match("(%d+),(%d+)")
+                              or message:match("(%d+)#(%d+)")
+                if mID and lvl then
+                    KR:SaveMemberKey(senderName, tonumber(mID), tonumber(lvl), "LibTomoKeystoneSync")
+                    KR:UpdateGroupRoster()
+                end
+            end
+
         elseif prefix == "LibKeystone" or prefix == "LibKeystone-1.0" or prefix == "LKS" or prefix == "LKS1" or prefix == "LibDungeonKeys-1.0" then
             if message == "REQUEST" or message == "REQ" or message == "PING" then
                 KR:BroadcastKeystone()
@@ -501,6 +580,10 @@ SlashCmdList["KEYROULETTE"] = function(msg)
     if msg == "spin" then
         if KR.StartRouletteSpin then
             KR:StartRouletteSpin()
+        end
+    elseif msg == "resync" or msg == "sync" then
+        if KR.ResyncAllKeys then
+            KR:ResyncAllKeys()
         end
     else
         local ok, err = pcall(function() KR:ToggleUI() end)
