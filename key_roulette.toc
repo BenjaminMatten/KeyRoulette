@@ -1,0 +1,10 @@
+## Interface: 110007
+## Title: Key Roulette
+## Notes: Sleek EllesmereUI-styled Mythic+ Key roulette wheel for WoW groups. Picks a random M+ key and announces it to chat.
+## Author: Benny
+## Version: 1.0.0
+## SavedVariables: KeyRouletteDB
+
+Localization.lua
+Core.lua
+UI.lua
