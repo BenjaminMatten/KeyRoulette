@@ -78,7 +78,7 @@ local function CreateMainFrame()
     local template = BackdropTemplateMixin and "BackdropTemplate" or nil
 
     mainFrame = CreateFrame("Frame", "KeyRouletteMainFrame", UIParent, template)
-    mainFrame:SetSize(420, 490)
+    mainFrame:SetSize(450, 500)
     mainFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     mainFrame:SetMovable(true)
     mainFrame:EnableMouse(true)
@@ -103,12 +103,12 @@ local function CreateMainFrame()
 
     -- Header Title
     local title = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    title:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 16, -14)
+    title:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 14, -10)
     title:SetText("|c" .. phex .. "KEY ROULETTE|r")
 
-    -- Subtitle
+    -- Subtitle (Stacked vertically under title so top buttons never cover it)
     local subtitle = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    subtitle:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
     subtitle:SetText("Mythic+ Group Roulette")
 
     -- Close Button
@@ -116,18 +116,18 @@ local function CreateMainFrame()
     closeBtn:SetSize(22, 22)
     closeBtn:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -10, -10)
     closeBtn:SetNormalFontObject("GameFontHighlight")
-    closeBtn:SetText("✕")
+    closeBtn:SetText("X")
     closeBtn:SetScript("OnClick", function() mainFrame:Hide() end)
     AddTooltip(closeBtn, "Close Window", "Hides the Key Roulette frame.")
 
     -- Debug Copy Button
     local debugBtn = CreateFrame("Button", nil, mainFrame, template)
-    debugBtn:SetSize(72, 22)
+    debugBtn:SetSize(62, 22)
     debugBtn:SetPoint("RIGHT", closeBtn, "LEFT", -6, 0)
     ApplyStyle(debugBtn, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
     local debugText = debugBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     debugText:SetPoint("CENTER", debugBtn, "CENTER", 0, 0)
-    debugText:SetText("📋 Debug")
+    debugText:SetText("Debug")
     debugBtn:SetScript("OnClick", function()
         if KR.RunDebug then KR:RunDebug() end
     end)
@@ -135,12 +135,12 @@ local function CreateMainFrame()
 
     -- Refresh Sync Button
     local refreshBtn = CreateFrame("Button", nil, mainFrame, template)
-    refreshBtn:SetSize(62, 22)
+    refreshBtn:SetSize(54, 22)
     refreshBtn:SetPoint("RIGHT", debugBtn, "LEFT", -6, 0)
     ApplyStyle(refreshBtn, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
     local refreshText = refreshBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     refreshText:SetPoint("CENTER", refreshBtn, "CENTER", 0, 0)
-    refreshText:SetText("🔄 Sync")
+    refreshText:SetText("Sync")
     refreshBtn:SetScript("OnClick", function()
         if KR.ResyncAllKeys then
             KR:ResyncAllKeys()
@@ -153,12 +153,12 @@ local function CreateMainFrame()
 
     -- Ask Party for Keys Button (For Standard UI Players)
     local askBtn = CreateFrame("Button", nil, mainFrame, template)
-    askBtn:SetSize(78, 22)
+    askBtn:SetSize(72, 22)
     askBtn:SetPoint("RIGHT", refreshBtn, "LEFT", -6, 0)
     ApplyStyle(askBtn, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
     local askText = askBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     askText:SetPoint("CENTER", askBtn, "CENTER", 0, 0)
-    askText:SetText("📢 Ask Keys")
+    askText:SetText("Ask Keys")
     askBtn:SetScript("OnClick", function()
         if KR.AskPartyForKeys then KR:AskPartyForKeys() end
     end)
@@ -166,8 +166,8 @@ local function CreateMainFrame()
 
     -- Member Cards Scroll/List Container
     local listContainer = CreateFrame("Frame", nil, mainFrame, template)
-    listContainer:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 14, -45)
-    listContainer:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -14, -45)
+    listContainer:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 14, -54)
+    listContainer:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -14, -54)
     listContainer:SetHeight(290)
     ApplyStyle(listContainer, 0.03, 0.03, 0.04, 0.8, 0.12, 0.12, 0.15, 1)
     mainFrame.listContainer = listContainer
@@ -222,7 +222,7 @@ local function CreateMainFrame()
         chanText:SetText(channels[nextIdx])
         pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
     end)
-    AddTooltip(chanBtn, "Chat Output Channel", "Click to cycle output channel:", "PARTY ➜ RAID ➜ SAY ➜ INSTANCE_CHAT ➜ SELF")
+    AddTooltip(chanBtn, "Chat Output Channel", "Click to cycle output channel:", "PARTY -> RAID -> SAY -> INSTANCE_CHAT -> SELF")
 
     -- Auto Announce Checkbox
     local autoCheck = CreateFrame("CheckButton", nil, controlsBar)
@@ -247,13 +247,13 @@ local function CreateMainFrame()
 
     -- Resync Keys Button
     local resyncBtn = CreateFrame("Button", nil, mainFrame, template)
-    resyncBtn:SetSize(110, 40)
+    resyncBtn:SetSize(114, 40)
     resyncBtn:SetPoint("BOTTOMLEFT", mainFrame, "BOTTOMLEFT", 14, 14)
     ApplyStyle(resyncBtn, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
 
     local resyncText = resyncBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     resyncText:SetPoint("CENTER", resyncBtn, "CENTER", 0, 0)
-    resyncText:SetText("🔄 Resync All")
+    resyncText:SetText("Resync All")
     resyncBtn.text = resyncText
 
     resyncBtn:SetScript("OnEnter", function(self)
@@ -269,13 +269,13 @@ local function CreateMainFrame()
 
     -- Big Spin Action Button
     local spinBtn = CreateFrame("Button", nil, mainFrame, template)
-    spinBtn:SetSize(274, 40)
+    spinBtn:SetSize(294, 40)
     spinBtn:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", -14, 14)
     ApplyStyle(spinBtn, pr * 0.25, pg * 0.25, pb * 0.25, 0.95, pr, pg, pb, 1)
 
     local spinText = spinBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     spinText:SetPoint("CENTER", spinBtn, "CENTER", 0, 0)
-    spinText:SetText("|c" .. phex .. (L["SPIN_BUTTON"] or "🎲 SPIN ROULETTE") .. "|r")
+    spinText:SetText("|c" .. phex .. (L["SPIN_BUTTON"] or "SPIN ROULETTE") .. "|r")
     spinBtn.text = spinText
 
     spinBtn:SetScript("OnEnter", function(self)
@@ -301,7 +301,7 @@ KR.CreateMainFrame = CreateMainFrame
 local function CreateMemberRow(parent, index)
     local template = BackdropTemplateMixin and "BackdropTemplate" or nil
     local row = CreateFrame("Frame", nil, parent, template)
-    row:SetSize(384, 50)
+    row:SetSize(414, 50)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -4 - ((index - 1) * 56))
     ApplyStyle(row, 0.08, 0.08, 0.10, 0.9, 0.18, 0.18, 0.22, 1)
 
@@ -319,28 +319,28 @@ local function CreateMemberRow(parent, index)
 
     -- Role Icon / Badge
     local roleText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    roleText:SetPoint("LEFT", excludeCheck, "RIGHT", 6, 0)
+    roleText:SetPoint("LEFT", excludeCheck, "RIGHT", 4, 0)
     roleText:SetSize(42, 16)
     row.roleText = roleText
 
     -- Character Name (Class Colored)
     local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    nameText:SetPoint("LEFT", roleText, "RIGHT", 6, 0)
+    nameText:SetPoint("LEFT", roleText, "RIGHT", 4, 0)
     nameText:SetWidth(110)
     nameText:SetJustifyH("LEFT")
     row.nameText = nameText
 
     -- Dungeon Icon
     local icon = row:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(32, 32)
-    icon:SetPoint("LEFT", nameText, "RIGHT", 6, 0)
+    icon:SetSize(28, 28)
+    icon:SetPoint("LEFT", nameText, "RIGHT", 4, 0)
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     row.icon = icon
 
     -- Key Info String
     local keyText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    keyText:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-    keyText:SetWidth(120)
+    keyText:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+    keyText:SetWidth(135)
     keyText:SetJustifyH("LEFT")
     row.keyText = keyText
 
@@ -352,7 +352,7 @@ local function CreateMemberRow(parent, index)
     
     local editBtnText = editBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     editBtnText:SetPoint("CENTER", editBtn, "CENTER", 0, 0)
-    editBtnText:SetText("✏️ Edit")
+    editBtnText:SetText("Edit")
     row.editBtn = editBtn
     AddTooltip(editBtn, "Manual Key Edit", "Manually set or override key level and dungeon for this player.")
 
@@ -533,7 +533,7 @@ function KR:ShowCopyWindow(text)
         closeBtn:SetSize(20, 20)
         closeBtn:SetPoint("TOPRIGHT", copyModal, "TOPRIGHT", -12, -12)
         closeBtn:SetNormalFontObject("GameFontHighlight")
-        closeBtn:SetText("✕")
+        closeBtn:SetText("X")
         closeBtn:SetScript("OnClick", function() copyModal:Hide() end)
 
         local scrollArea = CreateFrame("ScrollFrame", "KeyRouletteCopyScroll", copyModal, "UIPanelScrollFrameTemplate")
@@ -646,7 +646,7 @@ function KR:StartRouletteSpin()
             end
 
             if mainFrame and mainFrame.banner then
-                mainFrame.banner.text:SetText("|cffffd700🏆 WINNER: " .. (winner.name or "Player") .. " (+" .. winner.key.level .. " " .. winner.key.dungeonName .. ")|r")
+                mainFrame.banner.text:SetText("|cffffd700WINNER: " .. (winner.name or "Player") .. " (+" .. winner.key.level .. " " .. winner.key.dungeonName .. ")|r")
             end
 
             pcall(PlaySound, SOUNDKIT.UI_EPICLOOT_TOAST or 31578)

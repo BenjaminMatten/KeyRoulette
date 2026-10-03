@@ -8,7 +8,7 @@ KeyRouletteDB = KeyRouletteDB or {
     announceChannel = "PARTY",
     autoAnnounce = true,
     showMinimap = true,
-    customFormat = "🎲 Key Roulette picked: %s's +%d %s!",
+    customFormat = "[Key Roulette] picked: %s's +%d %s!",
     groupKeys = {},
 }
 
@@ -302,7 +302,7 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
     -- Purge any legacy RaiderIO caches
     KR:PurgeRaiderIOData()
 
-    -- 1. Check manual user override (✏️ Edit button in UI)
+    -- 1. Check manual user override (Edit button in UI)
     if KR.manualKeys[name] then return KR.manualKeys[name] end
     if KR.manualKeys[shortName] then return KR.manualKeys[shortName] end
     if KR.manualKeys[fullName] then return KR.manualKeys[fullName] end
@@ -814,6 +814,15 @@ function KR:ScanGuildRosterKeys()
     end)
 end
 
+-- Helper function to safely send addon messages with channel verification
+local function SafeSendAddonMsg(prefix, text, targetChan)
+    if not targetChan then return end
+    if (targetChan == "PARTY" or targetChan == "RAID") and not IsInGroup() then return end
+    if targetChan == "RAID" and not IsInRaid() then return end
+    if targetChan == "GUILD" and not IsInGuild() then return end
+    pcall(C_ChatInfo.SendAddonMessage, prefix, text, targetChan)
+end
+
 -- Broadcast Self Keystone to Party & Guild
 function KR:BroadcastKeystone()
     if InCombatLockdown() or KR.inCombat then return end
@@ -828,17 +837,14 @@ function KR:BroadcastKeystone()
         table.insert(channels, "GUILD")
     end
 
+    if #channels == 0 then return end
+
     for _, targetChan in ipairs(channels) do
-        pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or ""), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "EllesmereUI", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "Ellesmere", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LibOpenKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LTKS", string.format("%d:%d", key.mapID, key.level), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LKS", string.format("%d:%d", key.mapID, key.level), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LibOpenRaid", string.format("KEY,%d,%d", key.mapID, key.level), targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LOR", string.format("KEY,%d,%d", key.mapID, key.level), targetChan)
+        SafeSendAddonMsg("KeyRoulette", string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or ""), targetChan)
+        SafeSendAddonMsg("EllesmereUI", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
+        SafeSendAddonMsg("LibOpenKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
+        SafeSendAddonMsg("LibTomoKeystoneSync", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
+        SafeSendAddonMsg("LibOpenRaid", string.format("KEY,%d,%d", key.mapID, key.level), targetChan)
     end
 end
 
@@ -854,80 +860,77 @@ function KR:RequestGroupKeystones()
         table.insert(channels, "GUILD")
     end
 
-    -- Invoke EllesmereUI functions
-    local eui = _G.EllesmereUI or _G.Ellesmere
-    if eui then
-        pcall(function()
-            if eui.RequestKeystones then eui:RequestKeystones() end
-            if eui.SyncKeystones then eui:SyncKeystones() end
-        end)
-    end
+    if #channels > 0 then
+        -- Invoke EllesmereUI functions
+        local eui = _G.EllesmereUI or _G.Ellesmere
+        if eui then
+            pcall(function()
+                if eui.RequestKeystones then eui:RequestKeystones() end
+                if eui.SyncKeystones then eui:SyncKeystones() end
+            end)
+        end
 
-    -- Invoke LibOpenKeystone functions
-    local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
-    if lok then
-        pcall(function()
-            if lok.RequestKeystones then lok:RequestKeystones() end
-            if lok.SendKeystone then lok:SendKeystone() end
-        end)
-    end
+        -- Invoke LibOpenKeystone functions
+        local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
+        if lok then
+            pcall(function()
+                if lok.RequestKeystones then lok:RequestKeystones() end
+                if lok.SendKeystone then lok:SendKeystone() end
+            end)
+        end
 
-    -- Invoke LibOpenRaid functions
-    local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
-    if lor then
-        pcall(function()
-            if lor.RequestKeystoneInfo then lor:RequestKeystoneInfo() end
-            if lor.SendKeystoneInfo then lor:SendKeystoneInfo() end
-            if lor.RequestAllAlliesData then lor:RequestAllAlliesData() end
-        end)
-    end
+        -- Invoke LibOpenRaid functions
+        local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
+        if lor then
+            pcall(function()
+                if lor.RequestKeystoneInfo then lor:RequestKeystoneInfo() end
+                if lor.SendKeystoneInfo then lor:SendKeystoneInfo() end
+                if lor.RequestAllAlliesData then lor:RequestAllAlliesData() end
+            end)
+        end
 
-    -- Invoke LibTomoKeystoneSync functions
-    local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
-              or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync
-    if tomo then
-        pcall(function()
-            if tomo.RequestKeystones then tomo:RequestKeystones() end
-            if tomo.RequestKeys then tomo:RequestKeys() end
-            if tomo.SendKeystone then tomo:SendKeystone() end
-            if tomo.Sync then tomo:Sync() end
-        end)
-    end
+        -- Invoke LibTomoKeystoneSync functions
+        local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
+                  or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync
+        if tomo then
+            pcall(function()
+                if tomo.RequestKeystones then tomo:RequestKeystones() end
+                if tomo.RequestKeys then tomo:RequestKeys() end
+                if tomo.SendKeystone then tomo:SendKeystone() end
+                if tomo.Sync then tomo:Sync() end
+            end)
+        end
 
-    -- Invoke LibKeystone functions
-    local lks = LibStub and LibStub("LibKeystone-1.0", true)
-    if lks then
-        pcall(function()
-            if lks.RequestKeystones then lks:RequestKeystones() end
-            if lks.SendKeystone then lks:SendKeystone() end
-        end)
-    end
+        -- Invoke LibKeystone functions
+        local lks = LibStub and LibStub("LibKeystone-1.0", true)
+        if lks then
+            pcall(function()
+                if lks.RequestKeystones then lks:RequestKeystones() end
+                if lks.SendKeystone then lks:SendKeystone() end
+            end)
+        end
 
-    -- Send network pings
-    for _, targetChan in ipairs(channels) do
-        pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "EllesmereUI", "REQUEST", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "Ellesmere", "REQUEST", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LibOpenKeystone", "REQUEST", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", "REQUEST", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LTKS", "REQ", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", "REQUEST", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LKS", "REQ", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LibOpenRaid", "REQUEST_KEY", targetChan)
-        pcall(C_ChatInfo.SendAddonMessage, "LOR", "REQ_KEY", targetChan)
+        -- Send network pings to active channels
+        for _, targetChan in ipairs(channels) do
+            SafeSendAddonMsg("KeyRoulette", "PING", targetChan)
+            SafeSendAddonMsg("EllesmereUI", "REQUEST", targetChan)
+            SafeSendAddonMsg("LibOpenKeystone", "REQUEST", targetChan)
+            SafeSendAddonMsg("LibTomoKeystoneSync", "REQUEST", targetChan)
+            SafeSendAddonMsg("LibOpenRaid", "REQUEST_KEY", targetChan)
+        end
     end
 end
 
 -- Ask Party for Keys Chat Prompt (For standard UI players)
 function KR:AskPartyForKeys()
-    local msg = "🎲 [Key Roulette]: Please link your Mythic+ keystone in chat!"
-    if IsInGroup() then
-        SendChatMessage(msg, IsInRaid() and "RAID" or "PARTY")
-    else
+    if not IsInGroup() then
         if DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r " .. msg)
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r You are not currently in a party or raid group.")
         end
+        return
     end
+    local msg = "[Key Roulette]: Please link your Mythic+ keystone in chat!"
+    SendChatMessage(msg, IsInRaid() and "RAID" or "PARTY")
     KR:RequestGroupKeystones()
 end
 
@@ -940,25 +943,20 @@ function KR:ResyncAllKeys()
         return
     end
     KR:ScanPlayerKeystone()
-    KR:RequestGroupKeystones()
-    KR:BroadcastKeystone()
+    if IsInGroup() or IsInGuild() then
+        KR:RequestGroupKeystones()
+        KR:BroadcastKeystone()
+    end
     KR:UpdateGroupRoster(true)
 
-    -- Staggered async timers to capture network responses
-    C_Timer.After(0.4, function()
-        if not InCombatLockdown() then
-            KR:RequestGroupKeystones()
-            KR:UpdateGroupRoster(true)
-        end
-    end)
-    C_Timer.After(1.2, function()
-        if not InCombatLockdown() then
-            KR:UpdateGroupRoster(true)
-        end
-    end)
-
     if KR.UIFrame and KR.UIFrame.banner then
-        KR.UIFrame.banner.text:SetText("|cff00ffcc🔄 Resynced group keys!|r")
+        if IsInGroup() then
+            KR.UIFrame.banner.text:SetText("|cff00ffccResynced group keys!|r")
+        elseif IsInGuild() then
+            KR.UIFrame.banner.text:SetText("|cff00ffccResynced guild keys!|r")
+        else
+            KR.UIFrame.banner.text:SetText("|cffffaa00Updated solo player key!|r")
+        end
     end
     pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
 end
@@ -1051,7 +1049,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             KeyRouletteDB.announceChannel = KeyRouletteDB.announceChannel or "PARTY"
             if KeyRouletteDB.autoAnnounce == nil then KeyRouletteDB.autoAnnounce = true end
             if KeyRouletteDB.showMinimap == nil then KeyRouletteDB.showMinimap = true end
-            KeyRouletteDB.customFormat = KeyRouletteDB.customFormat or "🎲 Key Roulette picked: %s's +%d %s!"
+            KeyRouletteDB.customFormat = KeyRouletteDB.customFormat or "[Key Roulette] picked: %s's +%d %s!"
             KeyRouletteDB.groupKeys = KeyRouletteDB.groupKeys or {}
 
             RegisterAddonPrefixes()
@@ -1204,7 +1202,7 @@ end)
 function KR:AnnounceWinner(winner)
     if not winner or not winner.key then return end
     local key = winner.key
-    local fmt = (KeyRouletteDB and KeyRouletteDB.customFormat) or "🎲 Key Roulette picked: %s's +%d %s!"
+    local fmt = (KeyRouletteDB and KeyRouletteDB.customFormat) or "[Key Roulette] picked: %s's +%d %s!"
     local msg = string.format(fmt, winner.name, key.level, key.dungeonName)
 
     local channel = (KeyRouletteDB and KeyRouletteDB.announceChannel) or "PARTY"
