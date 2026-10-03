@@ -159,8 +159,8 @@ end
 -- Universal MapID and Level Extractor (Handles tables, multi-returns, string pairs)
 local function ExtractMapAndLevel(res1, res2)
     if type(res1) == "table" then
-        local mID = tonumber(res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1.map_id or res1.keyID or res1.map or res1[1])
-        local lvl = tonumber(res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1.key_level or res1.level_num or res1[2])
+        local mID = tonumber(res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1.map_id or res1.keyID or res1.map or res1.keystoneMapID or res1.keystoneMap or res1.challengeMapId or res1[1])
+        local lvl = tonumber(res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1.key_level or res1.level_num or res1.keystoneLevel or res1.keyLvl or res1[2])
         return mID, lvl
     elseif type(res1) == "number" and type(res2) == "number" then
         return res1, res2
@@ -466,13 +466,45 @@ function KR:RunDebug()
                 -- RaiderIO check
                 if _G.RaiderIO and _G.RaiderIO.GetProfile then
                     pcall(function()
-                        local prof = _G.RaiderIO.GetProfile(unit) or _G.RaiderIO.GetProfile(shortName)
-                        if prof then AddLog("  [RaiderIO.GetProfile]: profile object found") end
+                        local prof = _G.RaiderIO.GetProfile(unit) or _G.RaiderIO.GetProfile(shortName) or _G.RaiderIO.GetProfile(name)
+                        if prof then
+                            AddLog("  [RaiderIO.GetProfile]: profile object found for " .. name)
+                            if type(prof) == "table" then
+                                for k, v in pairs(prof) do
+                                    if type(v) ~= "function" then
+                                        if type(v) == "table" then
+                                            AddLog("    prof." .. tostring(k) .. " (table):")
+                                            for k2, v2 in pairs(v) do
+                                                if type(v2) ~= "function" then
+                                                    AddLog("      prof." .. tostring(k) .. "." .. tostring(k2) .. " = " .. tostring(v2))
+                                                end
+                                            end
+                                        else
+                                            AddLog("    prof." .. tostring(k) .. " = " .. tostring(v))
+                                        end
+                                    end
+                                end
+                            end
+                        end
                     end)
                 end
 
                 -- KeystoneLoot check
-                if _G.KeystoneLootDB then AddLog("  [KeystoneLootDB]: present") end
+                if _G.KeystoneLootDB then
+                    pcall(function()
+                        AddLog("  [KeystoneLootDB dump for " .. name .. "]:")
+                        for k, v in pairs(_G.KeystoneLootDB) do
+                            if type(k) == "string" and (k:find(shortName) or k:find(name) or k == "characters" or k == "keys" or k == "keystones") then
+                                AddLog("    KeystoneLootDB[" .. tostring(k) .. "] = " .. tostring(v))
+                                if type(v) == "table" then
+                                    for k2, v2 in pairs(v) do
+                                        AddLog("      [" .. tostring(k2) .. "] = " .. tostring(v2))
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                end
             end
         end
     end
