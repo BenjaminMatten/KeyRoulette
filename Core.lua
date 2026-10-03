@@ -9,6 +9,7 @@ KeyRouletteDB = KeyRouletteDB or {
     autoAnnounce = true,
     showMinimap = true,
     customFormat = "🎲 Key Roulette picked: %s's +%d %s!",
+    groupKeys = {},
 }
 
 KR.frame = CreateFrame("Frame")
@@ -42,6 +43,28 @@ local function RegisterAddonPrefixes()
     }
     for _, p in ipairs(prefixes) do
         pcall(C_ChatInfo.RegisterAddonMessagePrefix, p)
+    end
+end
+
+-- Register Library Event Callbacks (LibOpenRaid & LibTomoKeystoneSync)
+local function RegisterLibraryCallbacks()
+    local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
+    if lor and lor.RegisterCallback then
+        pcall(function()
+            lor:RegisterCallback("KeystoneUpdate", function()
+                KR:UpdateGroupRoster()
+            end)
+        end)
+    end
+
+    local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
+              or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync
+    if tomo and tomo.RegisterCallback then
+        pcall(function()
+            tomo:RegisterCallback("KeystoneUpdate", function()
+                KR:UpdateGroupRoster()
+            end)
+        end)
     end
 end
 
@@ -95,7 +118,7 @@ function KR:GetDungeonInfo(mapID)
     return info
 end
 
--- Save Member Key with Name Normalization
+-- Save Member Key with Name Normalization & SavedVariables Persistence
 function KR:SaveMemberKey(rawName, mapID, level, source)
     if not rawName or not mapID or not level or mapID <= 0 or level <= 0 then return end
     local shortName = rawName:match("([^-]+)") or rawName
@@ -108,17 +131,26 @@ function KR:SaveMemberKey(rawName, mapID, level, source)
         level = level,
         dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
         icon = dungeon and dungeon.icon or 5254320,
-        source = source or "Synced"
+        source = source or "Synced",
+        timestamp = time()
     }
 
+    -- Memory cache
     KR.groupMembers[rawName] = keyData
     KR.groupMembers[shortName] = keyData
     KR.groupMembers[fullName] = keyData
     KR.groupMembers[rawName:lower()] = keyData
     KR.groupMembers[shortName:lower()] = keyData
+
+    -- Persistent SavedVariables cache
+    KeyRouletteDB = KeyRouletteDB or {}
+    KeyRouletteDB.groupKeys = KeyRouletteDB.groupKeys or {}
+    KeyRouletteDB.groupKeys[rawName] = keyData
+    KeyRouletteDB.groupKeys[shortName] = keyData
+    KeyRouletteDB.groupKeys[fullName] = keyData
 end
 
--- Comprehensive Keystone Lookup Engine (LibTomoKeystoneSync, EllesmereUI, LibOpenRaid, Details!, AstralKeys, Addon Sync)
+-- Comprehensive Keystone Lookup Engine (LibTomoKeystoneSync, EllesmereUI, LibOpenRaid, Details!, AstralKeys, DB Persistence)
 function KR:FindPartyMemberKey(unit, name)
     if not name then return nil end
     local shortName = name:match("([^-]+)") or name
@@ -130,12 +162,21 @@ function KR:FindPartyMemberKey(unit, name)
     if KR.manualKeys[shortName] then return KR.manualKeys[shortName] end
     if KR.manualKeys[fullName] then return KR.manualKeys[fullName] end
 
-    -- 2. Check cached sync database
+    -- 2. Check in-memory sync cache
     local cached = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
                 or KR.groupMembers[name:lower()] or KR.groupMembers[shortName:lower()]
     if cached then return cached end
 
-    -- 3. Check LibTomoKeystoneSync (EllesmereUI Native Library!)
+    -- 3. Check persistent SavedVariables DB cache
+    if KeyRouletteDB and KeyRouletteDB.groupKeys then
+        local saved = KeyRouletteDB.groupKeys[name] or KeyRouletteDB.groupKeys[shortName] or KeyRouletteDB.groupKeys[fullName]
+        if saved then
+            KR.groupMembers[name] = saved
+            return saved
+        end
+    end
+
+    -- 4. Check LibTomoKeystoneSync (EllesmereUI Native Library!)
     local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync or _G.TomoKeys
     if tomo then
@@ -168,19 +209,13 @@ function KR:FindPartyMemberKey(unit, name)
             local mapID = tonumber(tKey.mapID or tKey.challengeMapID or tKey.dungeonID or tKey.dungeon_id or (type(tKey) == "table" and tKey[1]))
             local level = tonumber(tKey.level or tKey.keyLevel or tKey.key_level or tKey.levelNumber or (type(tKey) == "table" and tKey[2]))
             if mapID and mapID > 0 and level and level > 0 then
-                local dungeon = KR:GetDungeonInfo(mapID)
-                return {
-                    mapID = mapID,
-                    level = level,
-                    dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
-                    icon = dungeon and dungeon.icon or 5254320,
-                    source = "LibTomoKeystoneSync"
-                }
+                KR:SaveMemberKey(name, mapID, level, "LibTomoKeystoneSync")
+                return KR.groupMembers[name]
             end
         end
     end
 
-    -- 4. Direct LibOpenRaid Inspection (Used by ElvUI, OmniCD)
+    -- 5. Direct LibOpenRaid Inspection (Used by ElvUI, OmniCD)
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor then
         local kInfo
@@ -200,38 +235,26 @@ function KR:FindPartyMemberKey(unit, name)
             local mapID = tonumber(kInfo.mapID or kInfo.challengeMapID or kInfo.dungeonID or (type(kInfo) == "table" and kInfo[1]))
             local level = tonumber(kInfo.level or kInfo.keyLevel or kInfo.levelNumber or (type(kInfo) == "table" and kInfo[2]))
             if mapID and mapID > 0 and level and level > 0 then
-                local dungeon = KR:GetDungeonInfo(mapID)
-                return {
-                    mapID = mapID,
-                    level = level,
-                    dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
-                    icon = dungeon and dungeon.icon or 5254320,
-                    source = "LibOpenRaid"
-                }
+                KR:SaveMemberKey(name, mapID, level, "LibOpenRaid")
+                return KR.groupMembers[name]
             end
         end
     end
 
-    -- 5. Direct Details! KeyLList Inspection
+    -- 6. Direct Details! KeyLList Inspection
     if _G.Details and _G.Details.Keystones then
         local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
         if dKey then
             local mapID = tonumber(dKey.mapID or dKey[1])
             local level = tonumber(dKey.level or dKey[2])
             if mapID and mapID > 0 and level and level > 0 then
-                local dungeon = KR:GetDungeonInfo(mapID)
-                return {
-                    mapID = mapID,
-                    level = level,
-                    dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
-                    icon = dungeon and dungeon.icon or 5254320,
-                    source = "Details"
-                }
+                KR:SaveMemberKey(name, mapID, level, "Details")
+                return KR.groupMembers[name]
             end
         end
     end
 
-    -- 6. Direct AstralKeys Inspection
+    -- 7. Direct AstralKeys Inspection
     if _G.AstralKeys then
         local aKey
         pcall(function()
@@ -245,14 +268,8 @@ function KR:FindPartyMemberKey(unit, name)
             local mapID = tonumber(aKey.dungeon_id or aKey.mapID or (type(aKey) == "table" and aKey[1]))
             local level = tonumber(aKey.key_level or aKey.level or (type(aKey) == "table" and aKey[2]))
             if mapID and mapID > 0 and level and level > 0 then
-                local dungeon = KR:GetDungeonInfo(mapID)
-                return {
-                    mapID = mapID,
-                    level = level,
-                    dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
-                    icon = dungeon and dungeon.icon or 5254320,
-                    source = "AstralKeys"
-                }
+                KR:SaveMemberKey(name, mapID, level, "AstralKeys")
+                return KR.groupMembers[name]
             end
         end
     end
@@ -330,10 +347,43 @@ function KR:BroadcastKeystone()
     end
 end
 
--- Request Group Keystones
+-- Request Group Keystones (Invokes library functions & sends addon network pings)
 function KR:RequestGroupKeystones()
     if not IsInGroup() then return end
     local targetChan = IsInRaid() and "RAID" or "PARTY"
+
+    -- Invoke LibOpenRaid functions
+    local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
+    if lor then
+        pcall(function()
+            if lor.RequestKeystoneInfo then lor:RequestKeystoneInfo() end
+            if lor.SendKeystoneInfo then lor:SendKeystoneInfo() end
+            if lor.RequestAllAlliesData then lor:RequestAllAlliesData() end
+        end)
+    end
+
+    -- Invoke LibTomoKeystoneSync functions
+    local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
+              or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync
+    if tomo then
+        pcall(function()
+            if tomo.RequestKeystones then tomo:RequestKeystones() end
+            if tomo.RequestKeys then tomo:RequestKeys() end
+            if tomo.SendKeystone then tomo:SendKeystone() end
+            if tomo.Sync then tomo:Sync() end
+        end)
+    end
+
+    -- Invoke LibKeystone functions
+    local lks = LibStub and LibStub("LibKeystone-1.0", true)
+    if lks then
+        pcall(function()
+            if lks.RequestKeystones then lks:RequestKeystones() end
+            if lks.SendKeystone then lks:SendKeystone() end
+        end)
+    end
+
+    -- Send network pings
     pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LibTomoKeystoneSync", "REQUEST", targetChan)
     pcall(C_ChatInfo.SendAddonMessage, "LTKS", "REQ", targetChan)
@@ -343,16 +393,24 @@ function KR:RequestGroupKeystones()
     pcall(C_ChatInfo.SendAddonMessage, "LOR", "REQ_KEY", targetChan)
 end
 
--- Manual Resync All Keys Action
+-- Manual Resync All Keys Action (Staggered multi-phase query)
 function KR:ResyncAllKeys()
-    KR.groupMembers = {}
     KR:ScanPlayerKeystone()
     KR:RequestGroupKeystones()
     KR:BroadcastKeystone()
     KR:UpdateGroupRoster()
 
+    -- Staggered async timers to capture network responses
+    C_Timer.After(0.4, function()
+        KR:RequestGroupKeystones()
+        KR:UpdateGroupRoster()
+    end)
+    C_Timer.After(1.2, function()
+        KR:UpdateGroupRoster()
+    end)
+
     if KR.UIFrame and KR.UIFrame.banner then
-        KR.UIFrame.banner.text:SetText("|cff00ffcc🔄 Resynced all group keys!|r")
+        KR.UIFrame.banner.text:SetText("|cff00ffcc🔄 Resynced group keys!|r")
     end
     pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
 end
@@ -417,14 +475,17 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             if KeyRouletteDB.autoAnnounce == nil then KeyRouletteDB.autoAnnounce = true end
             if KeyRouletteDB.showMinimap == nil then KeyRouletteDB.showMinimap = true end
             KeyRouletteDB.customFormat = KeyRouletteDB.customFormat or "🎲 Key Roulette picked: %s's +%d %s!"
+            KeyRouletteDB.groupKeys = KeyRouletteDB.groupKeys or {}
 
             RegisterAddonPrefixes()
+            RegisterLibraryCallbacks()
             KR:ScanPlayerKeystone()
             KR:UpdateGroupRoster()
         end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         RegisterAddonPrefixes()
+        RegisterLibraryCallbacks()
         KR:BroadcastKeystone()
         KR:UpdateGroupRoster()
         if DEFAULT_CHAT_FRAME then
