@@ -1,6 +1,34 @@
 -- Key Roulette UI - EllesmereUI Inspired Aesthetics
 local addonName, KR = ...
-local L = KR.L
+KR = KR or _G["KeyRoulette"] or {}
+_G["KeyRoulette"] = KR
+
+local L = KR.L or {}
+setmetatable(L, { __index = function(t, k) return k end })
+
+-- Class Color Helper Fallbacks
+KR.GetPlayerClassColor = KR.GetPlayerClassColor or function(self)
+    local _, classFilename = UnitClass("player")
+    local color = (CUSTOM_CLASS_COLORS and CUSTOM_CLASS_COLORS[classFilename]) or (classFilename and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFilename])
+    if color then
+        local hex = string.format("ff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
+        return color.r, color.g, color.b, hex, classFilename
+    end
+    return 0.8, 0.8, 0.8, "ffcccccc", "PRIEST"
+end
+
+KR.GetUnitClassColor = KR.GetUnitClassColor or function(self, unit)
+    if not unit or not UnitExists(unit) then
+        return 0.8, 0.8, 0.8, "ffcccccc", "PRIEST"
+    end
+    local _, classFilename = UnitClass(unit)
+    local color = (CUSTOM_CLASS_COLORS and CUSTOM_CLASS_COLORS[classFilename]) or (classFilename and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFilename])
+    if color then
+        local hex = string.format("ff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
+        return color.r, color.g, color.b, hex, classFilename
+    end
+    return 0.8, 0.8, 0.8, "ffcccccc", "PRIEST"
+end
 
 local mainFrame
 local memberRows = {}
@@ -85,8 +113,8 @@ local function CreateMainFrame()
     refreshBtn:SetNormalFontObject("GameFontHighlight")
     refreshBtn:SetText("🔄")
     refreshBtn:SetScript("OnClick", function()
-        KR:RequestGroupKeystones()
-        KR:UpdateGroupRoster()
+        if KR.RequestGroupKeystones then KR:RequestGroupKeystones() end
+        if KR.UpdateGroupRoster then KR:UpdateGroupRoster() end
         pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
     end)
 
@@ -119,7 +147,7 @@ local function CreateMainFrame()
 
     local channelLabel = controlsBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     channelLabel:SetPoint("LEFT", controlsBar, "LEFT", 4, 0)
-    channelLabel:SetText(L["CHAT_CHANNEL"])
+    channelLabel:SetText(L["CHAT_CHANNEL"] or "Chat Output:")
 
     -- Channel Dropdown Button
     local chanBtn = CreateFrame("Button", "KeyRouletteChanDropdown", controlsBar, template)
@@ -177,7 +205,7 @@ local function CreateMainFrame()
 
     local spinText = spinBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     spinText:SetPoint("CENTER", spinBtn, "CENTER", 0, 0)
-    spinText:SetText("|c" .. phex .. L["SPIN_BUTTON"] .. "|r")
+    spinText:SetText("|c" .. phex .. (L["SPIN_BUTTON"] or "SPIN ROULETTE") .. "|r")
     spinBtn.text = spinText
 
     spinBtn:SetScript("OnEnter", function(self)
@@ -187,7 +215,7 @@ local function CreateMainFrame()
         ApplyStyle(self, pr * 0.25, pg * 0.25, pb * 0.25, 0.95, pr, pg, pb, 1)
     end)
     spinBtn:SetScript("OnClick", function()
-        KR:StartRouletteSpin()
+        if KR.StartRouletteSpin then KR:StartRouletteSpin() end
     end)
 
     mainFrame.spinBtn = spinBtn
@@ -289,7 +317,7 @@ function KR:OnGroupUpdated()
                 row.excludeCheck:SetEnabled(true)
             else
                 row.icon:SetTexture(134400)
-                row.keyText:SetText("|cff888888" .. L["NO_KEY_DETECTED"] .. "|r")
+                row.keyText:SetText("|cff888888" .. (L["NO_KEY_DETECTED"] or "No Key Detected") .. "|r")
                 row.excludeCheck:SetEnabled(false)
             end
 
@@ -371,7 +399,7 @@ function KR:ShowManualEditModal(member)
                     icon = 5254320,
                     source = "Manual"
                 }
-                KR:UpdateGroupRoster()
+                if KR.UpdateGroupRoster then KR:UpdateGroupRoster() end
             end
             manualModal:Hide()
             pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
@@ -423,7 +451,7 @@ function KR:StartRouletteSpin()
     isSpinning = true
     if mainFrame and mainFrame.spinBtn then
         mainFrame.spinBtn:Disable()
-        mainFrame.spinBtn.text:SetText("|cffaaaaaa" .. L["SPINNING"] .. "|r")
+        mainFrame.spinBtn.text:SetText("|cffaaaaaa" .. (L["SPINNING"] or "SPINNING...") .. "|r")
     end
 
     -- Determine Winner
@@ -480,13 +508,13 @@ function KR:StartRouletteSpin()
 
             -- Announce
             if KeyRouletteDB and KeyRouletteDB.autoAnnounce then
-                KR:AnnounceWinner(winner)
+                if KR.AnnounceWinner then KR:AnnounceWinner(winner) end
             end
 
             isSpinning = false
             if mainFrame and mainFrame.spinBtn then
                 mainFrame.spinBtn:Enable()
-                mainFrame.spinBtn.text:SetText("|c" .. phex .. L["SPIN_BUTTON"] .. "|r")
+                mainFrame.spinBtn.text:SetText("|c" .. phex .. (L["SPIN_BUTTON"] or "SPIN ROULETTE") .. "|r")
             end
         end
     end
@@ -523,7 +551,7 @@ local function CreateMinimapButton()
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     btn:SetScript("OnClick", function()
-        KR:ToggleUI()
+        if KR.ToggleUI then KR:ToggleUI() end
     end)
 end
 
@@ -533,5 +561,5 @@ initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function()
     CreateMainFrame()
     CreateMinimapButton()
-    KR:UpdateGroupRoster()
+    if KR.UpdateGroupRoster then KR:UpdateGroupRoster() end
 end)
