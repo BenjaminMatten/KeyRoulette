@@ -94,6 +94,126 @@ function KR:GetDungeonInfo(mapID)
     return info
 end
 
+-- Save Member Key with Name Normalization
+function KR:SaveMemberKey(rawName, mapID, level, source)
+    if not rawName or not mapID or not level or mapID <= 0 or level <= 0 then return end
+    local shortName = rawName:match("([^-]+)") or rawName
+    local realm = GetNormalizedRealmName() or GetRealmName() or ""
+    local fullName = rawName:find("-") and rawName or (shortName .. "-" .. realm)
+
+    local dungeon = KR:GetDungeonInfo(mapID)
+    local keyData = {
+        mapID = mapID,
+        level = level,
+        dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
+        icon = dungeon and dungeon.icon or 5254320,
+        source = source or "Synced"
+    }
+
+    KR.groupMembers[rawName] = keyData
+    KR.groupMembers[shortName] = keyData
+    KR.groupMembers[fullName] = keyData
+    KR.groupMembers[rawName:lower()] = keyData
+    KR.groupMembers[shortName:lower()] = keyData
+end
+
+-- Comprehensive Keystone Lookup Engine (EllesmereUI, LibOpenRaid, Details!, AstralKeys, Addon Sync)
+function KR:FindPartyMemberKey(unit, name)
+    if not name then return nil end
+    local shortName = name:match("([^-]+)") or name
+    local realm = GetNormalizedRealmName() or GetRealmName() or ""
+    local fullName = name:find("-") and name or (shortName .. "-" .. realm)
+
+    -- 1. Check manual override
+    if KR.manualKeys[name] then return KR.manualKeys[name] end
+    if KR.manualKeys[shortName] then return KR.manualKeys[shortName] end
+    if KR.manualKeys[fullName] then return KR.manualKeys[fullName] end
+
+    -- 2. Check cached sync database
+    local cached = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+                or KR.groupMembers[name:lower()] or KR.groupMembers[shortName:lower()]
+    if cached then return cached end
+
+    -- 3. Direct LibOpenRaid Inspection (Used by EllesmereUI, ElvUI, OmniCD)
+    local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
+    if lor then
+        local kInfo
+        pcall(function()
+            if lor.GetKeystoneInfo then
+                kInfo = lor:GetKeystoneInfo(unit) or lor:GetKeystoneInfo(shortName) or lor:GetKeystoneInfo(fullName)
+            end
+            if not kInfo and lor.GetPlayerKeystone then
+                kInfo = lor:GetPlayerKeystone(unit) or lor:GetPlayerKeystone(shortName) or lor:GetPlayerKeystone(fullName)
+            end
+            if not kInfo and lor.KeystoneInfo then
+                kInfo = lor.KeystoneInfo[unit] or lor.KeystoneInfo[shortName] or lor.KeystoneInfo[fullName]
+            end
+        end)
+
+        if kInfo then
+            local mapID = tonumber(kInfo.mapID or kInfo.challengeMapID or kInfo.dungeonID or (type(kInfo) == "table" and kInfo[1]))
+            local level = tonumber(kInfo.level or kInfo.keyLevel or kInfo.levelNumber or (type(kInfo) == "table" and kInfo[2]))
+            if mapID and mapID > 0 and level and level > 0 then
+                local dungeon = KR:GetDungeonInfo(mapID)
+                return {
+                    mapID = mapID,
+                    level = level,
+                    dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
+                    icon = dungeon and dungeon.icon or 5254320,
+                    source = "LibOpenRaid"
+                }
+            end
+        end
+    end
+
+    -- 4. Direct Details! KeyLList Inspection
+    if _G.Details and _G.Details.Keystones then
+        local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
+        if dKey then
+            local mapID = tonumber(dKey.mapID or dKey[1])
+            local level = tonumber(dKey.level or dKey[2])
+            if mapID and mapID > 0 and level and level > 0 then
+                local dungeon = KR:GetDungeonInfo(mapID)
+                return {
+                    mapID = mapID,
+                    level = level,
+                    dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
+                    icon = dungeon and dungeon.icon or 5254320,
+                    source = "Details"
+                }
+            end
+        end
+    end
+
+    -- 5. Direct AstralKeys Inspection
+    if _G.AstralKeys then
+        local aKey
+        pcall(function()
+            if _G.AstralKeys.GetKey then
+                aKey = _G.AstralKeys:GetKey(shortName) or _G.AstralKeys:GetKey(fullName)
+            elseif type(_G.AstralKeys) == "table" then
+                aKey = _G.AstralKeys[shortName] or _G.AstralKeys[fullName]
+            end
+        end)
+        if aKey then
+            local mapID = tonumber(aKey.dungeon_id or aKey.mapID or (type(aKey) == "table" and aKey[1]))
+            local level = tonumber(aKey.key_level or aKey.level or (type(aKey) == "table" and aKey[2]))
+            if mapID and mapID > 0 and level and level > 0 then
+                local dungeon = KR:GetDungeonInfo(mapID)
+                return {
+                    mapID = mapID,
+                    level = level,
+                    dungeonName = dungeon and dungeon.name or ("Map " .. mapID),
+                    icon = dungeon and dungeon.icon or 5254320,
+                    source = "AstralKeys"
+                }
+            end
+        end
+    end
+
+    return nil
+end
+
 -- Scan Player Bag for Mythic+ Keystone
 function KR:ScanPlayerKeystone()
     local mapID, level, itemLink
@@ -148,7 +268,7 @@ function KR:ScanPlayerKeystone()
     return KR.playerKey
 end
 
--- Broadcast Self Keystone to Party (KeyRoulette, LibKeystone & LibOpenRaid compatible)
+-- Broadcast Self Keystone to Party
 function KR:BroadcastKeystone()
     if not IsInGroup() then return end
     local key = KR:ScanPlayerKeystone()
@@ -162,7 +282,7 @@ function KR:BroadcastKeystone()
     end
 end
 
--- Request Group Keystones (KeyRoulette, LibKeystone & LibOpenRaid compatible)
+-- Request Group Keystones
 function KR:RequestGroupKeystones()
     if not IsInGroup() then return end
     local targetChan = IsInRaid() and "RAID" or "PARTY"
@@ -209,7 +329,7 @@ function KR:UpdateGroupRoster()
                     name = name,
                     class = class,
                     role = role,
-                    key = KR.manualKeys[name] or KR.groupMembers[name],
+                    key = KR:FindPartyMemberKey(unit, name),
                     isSelf = false,
                 })
             end
@@ -266,15 +386,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             if mapID and level then
                 mapID = tonumber(mapID)
                 level = tonumber(level)
-                local dungeon = KR:GetDungeonInfo(mapID)
-
-                KR.groupMembers[senderName] = {
-                    mapID = mapID,
-                    level = level,
-                    dungeonName = (dungeon and dungeon.name) or ("Map " .. mapID),
-                    icon = dungeon and dungeon.icon or 5254320,
-                    source = "Chat Link"
-                }
+                KR:SaveMemberKey(senderName, mapID, level, "Chat Link")
                 KR:UpdateGroupRoster()
             end
         end
@@ -287,19 +399,9 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             if message == "PING" then
                 KR:BroadcastKeystone()
             elseif message:sub(1, 4) == "KEY:" then
-                local mapID, level, dungeonName = message:match("KEY:(%d+):(%d+):?(.*)")
+                local mapID, level = message:match("KEY:(%d+):(%d+)")
                 if mapID and level then
-                    mapID = tonumber(mapID)
-                    level = tonumber(level)
-                    local dungeon = KR:GetDungeonInfo(mapID)
-
-                    KR.groupMembers[senderName] = {
-                        mapID = mapID,
-                        level = level,
-                        dungeonName = (dungeon and dungeon.name) or (dungeonName ~= "" and dungeonName) or ("Map " .. mapID),
-                        icon = dungeon and dungeon.icon or 5254320,
-                        source = "Synced"
-                    }
+                    KR:SaveMemberKey(senderName, tonumber(mapID), tonumber(level), "Synced")
                     KR:UpdateGroupRoster()
                 end
             end
@@ -313,19 +415,8 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                               or message:match("(%d+)#(%d+)")
                               or message:match("UPDATE:(%d+):(%d+)")
                 if mID and lvl then
-                    mID = tonumber(mID)
-                    lvl = tonumber(lvl)
-                    if mID > 0 and lvl > 0 then
-                        local dungeon = KR:GetDungeonInfo(mID)
-                        KR.groupMembers[senderName] = {
-                            mapID = mID,
-                            level = lvl,
-                            dungeonName = dungeon and dungeon.name or ("Map " .. mID),
-                            icon = dungeon and dungeon.icon or 5254320,
-                            source = "LibKeystone"
-                        }
-                        KR:UpdateGroupRoster()
-                    end
+                    KR:SaveMemberKey(senderName, tonumber(mID), tonumber(lvl), "LibKeystone")
+                    KR:UpdateGroupRoster()
                 end
             end
 
@@ -339,19 +430,8 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                               or message:match("KEY:(%d+):(%d+)")
                               or message:match("(%d+):(%d+)")
                 if mID and lvl then
-                    mID = tonumber(mID)
-                    lvl = tonumber(lvl)
-                    if mID > 0 and lvl > 0 then
-                        local dungeon = KR:GetDungeonInfo(mID)
-                        KR.groupMembers[senderName] = {
-                            mapID = mID,
-                            level = lvl,
-                            dungeonName = dungeon and dungeon.name or ("Map " .. mID),
-                            icon = dungeon and dungeon.icon or 5254320,
-                            source = "LibOpenRaid"
-                        }
-                        KR:UpdateGroupRoster()
-                    end
+                    KR:SaveMemberKey(senderName, tonumber(mID), tonumber(lvl), "LibOpenRaid")
+                    KR:UpdateGroupRoster()
                 end
             end
 
@@ -359,19 +439,8 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             if message and (message:find("(%d+):(%d+)") or message:find("(%d+),(%d+)")) then
                 local mID, lvl = message:match("(%d+):(%d+)") or message:match("(%d+),(%d+)")
                 if mID and lvl then
-                    mID = tonumber(mID)
-                    lvl = tonumber(lvl)
-                    if mID > 100 and lvl > 1 then
-                        local dungeon = KR:GetDungeonInfo(mID)
-                        KR.groupMembers[senderName] = {
-                            mapID = mID,
-                            level = lvl,
-                            dungeonName = dungeon and dungeon.name or ("Map " .. mID),
-                            icon = dungeon and dungeon.icon or 5254320,
-                            source = "Addon Sync"
-                        }
-                        KR:UpdateGroupRoster()
-                    end
+                    KR:SaveMemberKey(senderName, tonumber(mID), tonumber(lvl), "Addon Sync")
+                    KR:UpdateGroupRoster()
                 end
             end
         end
