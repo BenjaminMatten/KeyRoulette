@@ -57,6 +57,19 @@ local function ApplyStyle(frame, bgR, bgG, bgB, bgA, borderR, borderG, borderB, 
     end
 end
 
+-- Reusable Tooltip Helper Utility
+local function AddTooltip(frame, title, line1, line2)
+    frame:HookScript("OnEnter", function(self)
+        local pr, pg, pb = KR:GetPlayerClassColor()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine(title, pr, pg, pb)
+        if line1 then GameTooltip:AddLine(line1, 1, 1, 1, true) end
+        if line2 then GameTooltip:AddLine(line2, 0.7, 0.7, 0.7, true) end
+        GameTooltip:Show()
+    end)
+    frame:HookScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
 -- Create Main UI Frame
 local function CreateMainFrame()
     if mainFrame then return mainFrame end
@@ -100,28 +113,34 @@ local function CreateMainFrame()
 
     -- Close Button
     local closeBtn = CreateFrame("Button", nil, mainFrame)
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -12, -12)
+    closeBtn:SetSize(22, 22)
+    closeBtn:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -10, -10)
     closeBtn:SetNormalFontObject("GameFontHighlight")
     closeBtn:SetText("✕")
     closeBtn:SetScript("OnClick", function() mainFrame:Hide() end)
+    AddTooltip(closeBtn, "Close Window", "Hides the Key Roulette frame.")
 
     -- Debug Copy Button
-    local debugBtn = CreateFrame("Button", nil, mainFrame)
-    debugBtn:SetSize(20, 20)
+    local debugBtn = CreateFrame("Button", nil, mainFrame, template)
+    debugBtn:SetSize(72, 22)
     debugBtn:SetPoint("RIGHT", closeBtn, "LEFT", -6, 0)
-    debugBtn:SetNormalFontObject("GameFontHighlight")
-    debugBtn:SetText("📋")
+    ApplyStyle(debugBtn, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
+    local debugText = debugBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    debugText:SetPoint("CENTER", debugBtn, "CENTER", 0, 0)
+    debugText:SetText("📋 Debug")
     debugBtn:SetScript("OnClick", function()
         if KR.RunDebug then KR:RunDebug() end
     end)
+    AddTooltip(debugBtn, "Debug & Copy Log", "Opens the debug log popup and copies diagnostic memory traces to clipboard.", "Outputs loaded library states and group keystone info.")
 
-    -- Refresh Button
-    local refreshBtn = CreateFrame("Button", nil, mainFrame)
-    refreshBtn:SetSize(20, 20)
+    -- Refresh Sync Button
+    local refreshBtn = CreateFrame("Button", nil, mainFrame, template)
+    refreshBtn:SetSize(62, 22)
     refreshBtn:SetPoint("RIGHT", debugBtn, "LEFT", -6, 0)
-    refreshBtn:SetNormalFontObject("GameFontHighlight")
-    refreshBtn:SetText("🔄")
+    ApplyStyle(refreshBtn, 0.12, 0.12, 0.16, 0.95, 0.3, 0.3, 0.35, 1)
+    local refreshText = refreshBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    refreshText:SetPoint("CENTER", refreshBtn, "CENTER", 0, 0)
+    refreshText:SetText("🔄 Sync")
     refreshBtn:SetScript("OnClick", function()
         if KR.ResyncAllKeys then
             KR:ResyncAllKeys()
@@ -130,6 +149,7 @@ local function CreateMainFrame()
             if KR.UpdateGroupRoster then KR:UpdateGroupRoster() end
         end
     end)
+    AddTooltip(refreshBtn, "Quick Sync", "Sends network queries across all supported addon channels (EllesmereUI, RaiderIO, LibOpenRaid, LibTomo, LibKeystone) to fetch party keystones.")
 
     -- Member Cards Scroll/List Container
     local listContainer = CreateFrame("Frame", nil, mainFrame, template)
@@ -189,6 +209,7 @@ local function CreateMainFrame()
         chanText:SetText(channels[nextIdx])
         pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
     end)
+    AddTooltip(chanBtn, "Chat Output Channel", "Click to cycle output channel:", "PARTY ➜ RAID ➜ SAY ➜ INSTANCE_CHAT ➜ SELF")
 
     -- Auto Announce Checkbox
     local autoCheck = CreateFrame("CheckButton", nil, controlsBar)
@@ -209,6 +230,7 @@ local function CreateMainFrame()
     local autoText = controlsBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     autoText:SetPoint("RIGHT", autoCheck, "LEFT", -2, 0)
     autoText:SetText("Auto-Chat")
+    AddTooltip(autoCheck, "Auto-Announce Winner", "Automatically posts the winning keystone choice to chat when the spin wheel finishes.")
 
     -- Resync Keys Button
     local resyncBtn = CreateFrame("Button", nil, mainFrame, template)
@@ -218,7 +240,7 @@ local function CreateMainFrame()
 
     local resyncText = resyncBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     resyncText:SetPoint("CENTER", resyncBtn, "CENTER", 0, 0)
-    resyncText:SetText("🔄 Resync")
+    resyncText:SetText("🔄 Resync All")
     resyncBtn.text = resyncText
 
     resyncBtn:SetScript("OnEnter", function(self)
@@ -230,6 +252,7 @@ local function CreateMainFrame()
     resyncBtn:SetScript("OnClick", function()
         if KR.ResyncAllKeys then KR:ResyncAllKeys() end
     end)
+    AddTooltip(resyncBtn, "Resync All Party Keys", "Triggers a 3-phase staggered network scan across all addon communication channels (EllesmereUI, RaiderIO, LibOpenRaid, etc.).")
 
     -- Big Spin Action Button
     local spinBtn = CreateFrame("Button", nil, mainFrame, template)
@@ -239,7 +262,7 @@ local function CreateMainFrame()
 
     local spinText = spinBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     spinText:SetPoint("CENTER", spinBtn, "CENTER", 0, 0)
-    spinText:SetText("|c" .. phex .. (L["SPIN_BUTTON"] or "SPIN ROULETTE") .. "|r")
+    spinText:SetText("|c" .. phex .. (L["SPIN_BUTTON"] or "🎲 SPIN ROULETTE") .. "|r")
     spinBtn.text = spinText
 
     spinBtn:SetScript("OnEnter", function(self)
@@ -251,6 +274,7 @@ local function CreateMainFrame()
     spinBtn:SetScript("OnClick", function()
         if KR.StartRouletteSpin then KR:StartRouletteSpin() end
     end)
+    AddTooltip(spinBtn, "Spin Keystone Roulette", "Starts the animated slot wheel selection to pick a random keystone from enabled group members.")
 
     mainFrame.spinBtn = spinBtn
     mainFrame.resyncBtn = resyncBtn
@@ -278,6 +302,7 @@ local function CreateMemberRow(parent, index)
     excludeCheck:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
     excludeCheck:SetChecked(true)
     row.excludeCheck = excludeCheck
+    AddTooltip(excludeCheck, "Include / Exclude Key", "Toggle whether this character's keystone is included in the roulette spin.")
 
     -- Role Icon / Badge
     local roleText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -308,14 +333,15 @@ local function CreateMemberRow(parent, index)
 
     -- Edit Button
     local editBtn = CreateFrame("Button", nil, row, template)
-    editBtn:SetSize(34, 22)
+    editBtn:SetSize(46, 22)
     editBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
     ApplyStyle(editBtn, 0.14, 0.14, 0.18, 1, 0.3, 0.3, 0.35, 1)
     
     local editBtnText = editBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     editBtnText:SetPoint("CENTER", editBtn, "CENTER", 0, 0)
-    editBtnText:SetText("Edit")
+    editBtnText:SetText("✏️ Edit")
     row.editBtn = editBtn
+    AddTooltip(editBtn, "Manual Key Edit", "Manually set or override key level and dungeon for this player.")
 
     memberRows[index] = row
     return row
