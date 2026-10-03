@@ -32,9 +32,12 @@ SafeRegisterEvent("CHAT_MSG_PARTY_LEADER")
 SafeRegisterEvent("CHAT_MSG_RAID")
 SafeRegisterEvent("CHAT_MSG_RAID_LEADER")
 
--- Register Popular Addon Channel Prefixes
+-- Register Popular & LibKeystone Addon Channel Prefixes
 local function RegisterAddonPrefixes()
-    local prefixes = { "KeyRoulette", "AstralKeys", "Details", "LibOpenRaid", "MythicKeystones" }
+    local prefixes = {
+        "KeyRoulette", "LibKeystone", "LibKeystone-1.0", "LKS", "LKS1",
+        "LibDungeonKeys-1.0", "AstralKeys", "Details", "LibOpenRaid", "MythicKeystones"
+    }
     for _, p in ipairs(prefixes) do
         pcall(C_ChatInfo.RegisterAddonMessagePrefix, p)
     end
@@ -144,20 +147,25 @@ function KR:ScanPlayerKeystone()
     return KR.playerKey
 end
 
--- Broadcast Self Keystone to Party
+-- Broadcast Self Keystone to Party (KeyRoulette & LibKeystone compatible)
 function KR:BroadcastKeystone()
     if not IsInGroup() then return end
     local key = KR:ScanPlayerKeystone()
     if key then
-        local msg = string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or "")
-        pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", msg, IsInRaid() and "RAID" or "PARTY")
+        local targetChan = IsInRaid() and "RAID" or "PARTY"
+        pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or ""), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
+        pcall(C_ChatInfo.SendAddonMessage, "LKS", string.format("%d:%d", key.mapID, key.level), targetChan)
     end
 end
 
--- Request Group Keystones
+-- Request Group Keystones (KeyRoulette & LibKeystone compatible)
 function KR:RequestGroupKeystones()
     if not IsInGroup() then return end
-    pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", IsInRaid() and "RAID" or "PARTY")
+    local targetChan = IsInRaid() and "RAID" or "PARTY"
+    pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", targetChan)
+    pcall(C_ChatInfo.SendAddonMessage, "LibKeystone", "REQUEST", targetChan)
+    pcall(C_ChatInfo.SendAddonMessage, "LKS", "REQ", targetChan)
 end
 
 -- Update Group Roster Data
@@ -290,8 +298,33 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                     KR:UpdateGroupRoster()
                 end
             end
+
+        elseif prefix == "LibKeystone" or prefix == "LibKeystone-1.0" or prefix == "LKS" or prefix == "LKS1" or prefix == "LibDungeonKeys-1.0" then
+            if message == "REQUEST" or message == "REQ" or message == "PING" then
+                KR:BroadcastKeystone()
+            else
+                local mID, lvl = message:match("KEY:(%d+):(%d+)")
+                              or message:match("(%d+):(%d+)")
+                              or message:match("(%d+)#(%d+)")
+                              or message:match("UPDATE:(%d+):(%d+)")
+                if mID and lvl then
+                    mID = tonumber(mID)
+                    lvl = tonumber(lvl)
+                    if mID > 0 and lvl > 0 then
+                        local dungeon = KR:GetDungeonInfo(mID)
+                        KR.groupMembers[senderName] = {
+                            mapID = mID,
+                            level = lvl,
+                            dungeonName = dungeon and dungeon.name or ("Map " .. mID),
+                            icon = dungeon and dungeon.icon or 5254320,
+                            source = "LibKeystone"
+                        }
+                        KR:UpdateGroupRoster()
+                    end
+                end
+            end
+
         elseif prefix == "AstralKeys" or prefix == "Details" or prefix == "LibOpenRaid" or prefix == "MythicKeystones" then
-            -- Cross-addon message parsing
             if message and message:find("(%d+):(%d+)") then
                 local mID, lvl = message:match("(%d+):(%d+)")
                 if mID and lvl then
