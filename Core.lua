@@ -159,8 +159,8 @@ end
 -- Universal MapID and Level Extractor (Handles tables, multi-returns, string pairs)
 local function ExtractMapAndLevel(res1, res2)
     if type(res1) == "table" then
-        local mID = tonumber(res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1.map_id or res1.keyID or res1[1])
-        local lvl = tonumber(res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1.key_level or res1[2])
+        local mID = tonumber(res1.mapID or res1.challengeMapID or res1.dungeonID or res1.dungeon_id or res1.map_id or res1.keyID or res1.map or res1[1])
+        local lvl = tonumber(res1.level or res1.keyLevel or res1.key_level or res1.levelNumber or res1.key_level or res1.level_num or res1[2])
         return mID, lvl
     elseif type(res1) == "number" and type(res2) == "number" then
         return res1, res2
@@ -200,7 +200,8 @@ function KR:FindPartyMemberKey(unit, name)
     local shortName = name:match("([^-]+)") or name
     local realm = GetNormalizedRealmName() or GetRealmName() or ""
     local fullName = name:find("-") and name or (shortName .. "-" .. realm)
-    local searchNames = { fullName, shortName, name }
+    local guid = UnitExists(unit) and UnitGUID(unit)
+    local searchNames = { fullName, shortName, name, guid }
 
     -- 1. Check manual override
     if KR.manualKeys[name] then return KR.manualKeys[name] end
@@ -221,16 +222,34 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 4. Check LibOpenRaid
+    -- 4. Check LibOpenRaid (Queries unit, guid, shortName, fullName)
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor then
         pcall(function()
             local r1, r2
-            if lor.GetKeystoneInfo then r1, r2 = lor:GetKeystoneInfo(unit) end
-            if not r1 and lor.GetPlayerKeystone then r1, r2 = lor:GetPlayerKeystone(unit) end
-            if not r1 and lor.GetKeystoneInfo then r1, r2 = lor:GetKeystoneInfo(shortName) end
-            if not r1 and lor.GetKeystoneInfo then r1, r2 = lor:GetKeystoneInfo(fullName) end
-            if not r1 and lor.KeystoneInfo then r1 = lor.KeystoneInfo[fullName] or lor.KeystoneInfo[shortName] or lor.KeystoneInfo[unit] end
+            if lor.GetKeystoneInfo then
+                r1, r2 = lor:GetKeystoneInfo(unit)
+                if not r1 and guid then r1, r2 = lor:GetKeystoneInfo(guid) end
+                if not r1 then r1, r2 = lor:GetKeystoneInfo(shortName) end
+                if not r1 then r1, r2 = lor:GetKeystoneInfo(fullName) end
+            end
+            if not r1 and lor.GetPlayerKeystone then
+                r1, r2 = lor:GetPlayerKeystone(unit)
+                if not r1 and guid then r1, r2 = lor:GetPlayerKeystone(guid) end
+                if not r1 then r1, r2 = lor:GetPlayerKeystone(shortName) end
+            end
+            if not r1 and lor.GetKeystones then
+                local allKeys = lor:GetKeystones()
+                if type(allKeys) == "table" then
+                    r1 = allKeys[unit] or (guid and allKeys[guid]) or allKeys[shortName] or allKeys[fullName]
+                end
+            end
+            if not r1 and lor.keystones then r1 = lor.keystones[unit] or (guid and lor.keystones[guid]) or lor.keystones[shortName] or lor.keystones[fullName] end
+            if not r1 and lor.KeystoneInfo then r1 = lor.KeystoneInfo[unit] or (guid and lor.KeystoneInfo[guid]) or lor.KeystoneInfo[shortName] or lor.KeystoneInfo[fullName] end
+            if not r1 and lor.allyData then
+                local ally = lor.allyData[unit] or (guid and lor.allyData[guid]) or lor.allyData[shortName] or lor.allyData[fullName]
+                if ally then r1 = ally.keystone or ally.keystoneInfo or ally end
+            end
 
             local mID, lvl = ExtractMapAndLevel(r1, r2)
             if mID and lvl then
@@ -240,7 +259,21 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 5. Check LibTomoKeystoneSync
+    -- 5. Check KeystoneLoot (KeystoneLootDB, KeystoneLootCharDB, KeystoneLootAPI)
+    if _G.KeystoneLootDB or _G.KeystoneLootAPI or _G.KeystoneLootCharDB then
+        pcall(function()
+            local kl = _G.KeystoneLootDB or _G.KeystoneLootAPI or _G.KeystoneLootCharDB
+            if kl then
+                local mID, lvl = DeepSearchTable(kl, searchNames, 0)
+                if mID and lvl then
+                    KR:SaveMemberKey(name, mID, lvl, "KeystoneLoot")
+                end
+            end
+        end)
+        if KR.groupMembers[name] then return KR.groupMembers[name] end
+    end
+
+    -- 6. Check LibTomoKeystoneSync
     local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync or _G.TomoKeys
     if tomo then
@@ -262,7 +295,7 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 6. Check LibOpenKeystone
+    -- 7. Check LibOpenKeystone
     local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
     if lok then
         pcall(function()
@@ -279,13 +312,21 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 7. Check RaiderIO
+    -- 8. Check RaiderIO
     if _G.RaiderIO then
         pcall(function()
             if _G.RaiderIO.GetProfile then
                 local prof = _G.RaiderIO.GetProfile(unit) or _G.RaiderIO.GetProfile(shortName) or _G.RaiderIO.GetProfile(fullName)
                 if prof then
-                    local mID, lvl = ExtractMapAndLevel(prof.keystone or prof.currentKeystone or prof)
+                    local mID, lvl = ExtractMapAndLevel(prof.keystone or prof.currentKeystone or prof.mythicKeystone or prof)
+                    if not mID and type(prof) == "table" then
+                        for k, v in pairs(prof) do
+                            if type(k) == "string" and (k:lower():find("key") or k:lower():find("dungeon")) then
+                                mID, lvl = ExtractMapAndLevel(v)
+                                if mID and lvl then break end
+                            end
+                        end
+                    end
                     if mID and lvl then
                         KR:SaveMemberKey(name, mID, lvl, "RaiderIO")
                     end
@@ -295,7 +336,7 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 8. Check Details!
+    -- 9. Check Details!
     if _G.Details and _G.Details.Keystones then
         pcall(function()
             local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
@@ -307,7 +348,7 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 9. Check AstralKeys
+    -- 10. Check AstralKeys
     if _G.AstralKeys then
         pcall(function()
             local aKey
@@ -322,7 +363,7 @@ function KR:FindPartyMemberKey(unit, name)
         if KR.groupMembers[name] then return KR.groupMembers[name] end
     end
 
-    -- 10. Deep Global Scanner for EllesmereUI, TustUI, EUI, KeyFrame, ElvUI, Cell, OmniCD, etc.
+    -- 11. Deep Global Scanner for EllesmereUI, EUI, KeystoneLoot, Tomo, ElvUI, Cell, OmniCD, etc.
     for gName, gVal in pairs(_G) do
         if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("Tust") or gName:find("EUI") or gName:find("Tomo") or gName:find("Elv") or gName:find("Key") or gName:find("Cell") or gName:find("Omni")) and type(gVal) == "table" then
             pcall(function()
@@ -335,7 +376,7 @@ function KR:FindPartyMemberKey(unit, name)
         end
     end
 
-    -- 11. Tooltip Unit Scanner (C_TooltipInfo)
+    -- 12. Tooltip Unit Scanner (C_TooltipInfo)
     if C_TooltipInfo and C_TooltipInfo.GetUnit then
         pcall(function()
             local data = C_TooltipInfo.GetUnit(unit)
@@ -393,6 +434,47 @@ function KR:RunDebug()
         AddLog("Found Related Globals: " .. table.concat(foundGlobals, ", "))
     else
         AddLog("No specific Ellesmere/Keystone globals found in _G.")
+    end
+
+    -- Deep Member Inspection Trace
+    if IsInGroup() then
+        local num = GetNumGroupMembers()
+        for i = 1, (num - 1) do
+            local unit = "party" .. i
+            if UnitExists(unit) then
+                local name = UnitName(unit)
+                local guid = UnitGUID(unit)
+                local shortName = name:match("([^-]+)") or name
+                AddLog("--- Inspecting Party Member " .. i .. ": " .. tostring(name) .. " (GUID: " .. tostring(guid) .. ") ---")
+
+                -- LibOpenRaid check
+                local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
+                if lor then
+                    pcall(function()
+                        if lor.GetKeystoneInfo then
+                            local m, l = lor:GetKeystoneInfo(unit)
+                            if not m and guid then m, l = lor:GetKeystoneInfo(guid) end
+                            if m and l then AddLog("  [LibOpenRaid:GetKeystoneInfo]: +" .. tostring(l) .. " (Map " .. tostring(m) .. ")") end
+                        end
+                        if lor.allyData then
+                            local ally = lor.allyData[unit] or (guid and lor.allyData[guid]) or lor.allyData[shortName]
+                            if ally then AddLog("  [LibOpenRaid.allyData]: found ally record") end
+                        end
+                    end)
+                end
+
+                -- RaiderIO check
+                if _G.RaiderIO and _G.RaiderIO.GetProfile then
+                    pcall(function()
+                        local prof = _G.RaiderIO.GetProfile(unit) or _G.RaiderIO.GetProfile(shortName)
+                        if prof then AddLog("  [RaiderIO.GetProfile]: profile object found") end
+                    end)
+                end
+
+                -- KeystoneLoot check
+                if _G.KeystoneLootDB then AddLog("  [KeystoneLootDB]: present") end
+            end
+        end
     end
 
     -- Dump cached keys
