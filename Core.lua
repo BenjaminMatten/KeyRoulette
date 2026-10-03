@@ -221,8 +221,23 @@ function KR:FindPartyMemberKey(unit, name)
             return saved
         end
     end
+    -- 4. Check EUIKeysPopup / EllesmereUI / EUI
+    if _G.EUIKeysPopup or _G.EllesmereUI or _G.EllesmereUIDB or _G.EUIKeys then
+        pcall(function()
+            local eui = _G.EUIKeysPopup or _G.EUIKeys or _G.EllesmereUI or _G.EllesmereUIDB
+            if eui then
+                local mID, lvl = DeepSearchTable(eui, searchNames, 0)
+                if mID and lvl then
+                    KR:SaveMemberKey(name, mID, lvl, "EllesmereUI (EUIKeys)")
+                end
+            end
+        end)
+        if KR.groupMembers[name] and KR.groupMembers[name].source and KR.groupMembers[name].source:find("Ellesmere") then
+            return KR.groupMembers[name]
+        end
+    end
 
-    -- 4. Check LibOpenRaid (Queries unit, guid, shortName, fullName)
+    -- 5. Check LibOpenRaid (Queries unit, guid, shortName, fullName)
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor then
         pcall(function()
@@ -436,10 +451,36 @@ function KR:RunDebug()
             table.insert(foundGlobals, gName)
         end
     end
-    if #foundGlobals > 0 then
-        AddLog("Found Related Globals: " .. table.concat(foundGlobals, ", "))
-    else
-        AddLog("No specific Ellesmere/Keystone globals found in _G.")
+    -- Dump EUIKeysPopup and EllesmereUIDB
+    if _G.EUIKeysPopup then
+        AddLog("=== EUIKeysPopup Table Dump ===")
+        pcall(function()
+            for k, v in pairs(_G.EUIKeysPopup) do
+                if type(v) ~= "function" then
+                    AddLog("  EUIKeysPopup." .. tostring(k) .. " = " .. tostring(v))
+                    if type(v) == "table" then
+                        for k2, v2 in pairs(v) do
+                            AddLog("    EUIKeysPopup." .. tostring(k) .. "." .. tostring(k2) .. " = " .. tostring(v2))
+                        end
+                    end
+                end
+            end
+        end)
+    end
+    if _G.EllesmereUIDB then
+        AddLog("=== EllesmereUIDB Table Dump ===")
+        pcall(function()
+            for k, v in pairs(_G.EllesmereUIDB) do
+                if type(k) == "string" and (k:lower():find("key") or k:lower():find("party") or k:lower():find("roster")) then
+                    AddLog("  EllesmereUIDB." .. tostring(k) .. " = " .. tostring(v))
+                    if type(v) == "table" then
+                        for k2, v2 in pairs(v) do
+                            AddLog("    EllesmereUIDB." .. tostring(k) .. "." .. tostring(k2) .. " = " .. tostring(v2))
+                        end
+                    end
+                end
+            end
+        end)
     end
 
     -- Deep Member Inspection Trace
