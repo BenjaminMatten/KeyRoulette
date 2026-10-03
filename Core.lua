@@ -100,7 +100,6 @@ function KR:ScanPlayerKeystone()
                 end
                 if link and (link:find("keystone:") or link:find("item:180653")) then
                     itemLink = link
-                    -- Parse Keystone link string format: |Hkeystone:Item:MapID:Level:...
                     local mID, lvl = link:match("keystone:%d+:(%d+):(%d+)")
                     if mID and lvl then
                         mapID = tonumber(mID)
@@ -136,14 +135,14 @@ function KR:BroadcastKeystone()
     local key = KR:ScanPlayerKeystone()
     if key then
         local msg = string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or "")
-        C_ChatInfo.SendAddonMessage("KeyRoulette", msg, IsInRaid() and "RAID" or "PARTY")
+        pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", msg, IsInRaid() and "RAID" or "PARTY")
     end
 end
 
 -- Request Group Keystones
 function KR:RequestGroupKeystones()
     if not IsInGroup() then return end
-    C_ChatInfo.SendAddonMessage("KeyRoulette", "PING", IsInRaid() and "RAID" or "PARTY")
+    pcall(C_ChatInfo.SendAddonMessage, "KeyRoulette", "PING", IsInRaid() and "RAID" or "PARTY")
 end
 
 -- Update Group Roster Data
@@ -192,7 +191,7 @@ function KR:UpdateGroupRoster()
     KR.currentMembers = members
 
     if KR.OnGroupUpdated then
-        KR:OnGroupUpdated()
+        pcall(KR.OnGroupUpdated, KR)
     end
 end
 
@@ -207,13 +206,13 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             if KeyRouletteDB.showMinimap == nil then KeyRouletteDB.showMinimap = true end
             KeyRouletteDB.customFormat = KeyRouletteDB.customFormat or "🎲 Key Roulette picked: %s's +%d %s!"
 
-            C_ChatInfo.RegisterAddonMessagePrefix("KeyRoulette")
+            pcall(C_ChatInfo.RegisterAddonMessagePrefix, "KeyRoulette")
             KR:ScanPlayerKeystone()
             KR:UpdateGroupRoster()
         end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
-        C_ChatInfo.RegisterAddonMessagePrefix("KeyRoulette")
+        pcall(C_ChatInfo.RegisterAddonMessagePrefix, "KeyRoulette")
         KR:BroadcastKeystone()
         KR:UpdateGroupRoster()
 
@@ -311,6 +310,9 @@ SlashCmdList["KEYROULETTE"] = function(msg)
             KR:StartRouletteSpin()
         end
     else
-        KR:ToggleUI()
+        local ok, err = pcall(function() KR:ToggleUI() end)
+        if not ok then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff4444[Key Roulette Error]|r " .. tostring(err))
+        end
     end
 end

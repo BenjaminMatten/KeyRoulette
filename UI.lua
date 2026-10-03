@@ -4,18 +4,39 @@ local L = KR.L
 
 local mainFrame
 local memberRows = {}
-local spinTicker
 local isSpinning = false
 local manualModal
+
+-- Safe Frame Style Utility (BackdropTemplate Compatible)
+local function ApplyStyle(frame, bgR, bgG, bgB, bgA, borderR, borderG, borderB, borderA)
+    if frame.SetBackdrop then
+        pcall(function()
+            frame:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8X8",
+                edgeFile = "Interface\\Buttons\\WHITE8X8",
+                tile = false, tileSize = 0, edgeSize = 1,
+                insets = { left = 0, right = 0, top = 0, bottom = 0 }
+            })
+            frame:SetBackdropColor(bgR or 0.05, bgG or 0.05, bgB or 0.07, bgA or 0.95)
+            frame:SetBackdropBorderColor(borderR or 0.18, borderG or 0.18, borderB or 0.22, borderA or 1)
+        end)
+    else
+        if not frame.krBgTex then
+            frame.krBgTex = frame:CreateTexture(nil, "BACKGROUND")
+            frame.krBgTex:SetAllPoints(frame)
+        end
+        frame.krBgTex:SetColorTexture(bgR or 0.05, bgG or 0.05, bgB or 0.07, bgA or 0.95)
+    end
+end
 
 -- Create Main UI Frame
 local function CreateMainFrame()
     if mainFrame then return mainFrame end
 
-    -- Fetch Class Color dynamically for current character
-    local pr, pg, pb, phex, pclass = KR:GetPlayerClassColor()
+    local pr, pg, pb, phex = KR:GetPlayerClassColor()
+    local template = BackdropTemplateMixin and "BackdropTemplate" or nil
 
-    mainFrame = CreateFrame("Frame", "KeyRouletteMainFrame", UIParent, "BackdropTemplate")
+    mainFrame = CreateFrame("Frame", "KeyRouletteMainFrame", UIParent, template)
     mainFrame:SetSize(420, 490)
     mainFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     mainFrame:SetMovable(true)
@@ -25,18 +46,11 @@ local function CreateMainFrame()
     mainFrame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     mainFrame:SetFrameStrata("HIGH")
 
-    -- Hide initially so it opens via /kr or minimap button
+    -- Hide initially
     mainFrame:Hide()
 
-    -- EllesmereUI Backdrop: Dark Slate with 1px border
-    mainFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    mainFrame:SetBackdropColor(0.05, 0.05, 0.07, 0.95)
-    mainFrame:SetBackdropBorderColor(0.18, 0.18, 0.22, 1)
+    -- Apply EllesmereUI Dark Theme
+    ApplyStyle(mainFrame, 0.05, 0.05, 0.07, 0.95, 0.18, 0.18, 0.22, 1)
 
     -- Top Class Color Accent Line
     local accentLine = mainFrame:CreateTexture(nil, "OVERLAY")
@@ -73,43 +87,23 @@ local function CreateMainFrame()
     refreshBtn:SetScript("OnClick", function()
         KR:RequestGroupKeystones()
         KR:UpdateGroupRoster()
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+        pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
     end)
-    refreshBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L["REFRESH"], 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    refreshBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Member Cards Scroll/List Container
-    local listContainer = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    local listContainer = CreateFrame("Frame", nil, mainFrame, template)
     listContainer:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 14, -45)
     listContainer:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -14, -45)
     listContainer:SetHeight(290)
-    listContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    listContainer:SetBackdropColor(0.03, 0.03, 0.04, 0.8)
-    listContainer:SetBackdropBorderColor(0.12, 0.12, 0.15, 1)
+    ApplyStyle(listContainer, 0.03, 0.03, 0.04, 0.8, 0.12, 0.12, 0.15, 1)
     mainFrame.listContainer = listContainer
 
     -- Winner Announcement Banner Frame
-    local banner = CreateFrame("Frame", nil, mainFrame, "BackdropTemplate")
+    local banner = CreateFrame("Frame", nil, mainFrame, template)
     banner:SetPoint("TOPLEFT", listContainer, "BOTTOMLEFT", 0, -8)
     banner:SetPoint("TOPRIGHT", listContainer, "BOTTOMRIGHT", 0, -8)
     banner:SetHeight(32)
-    banner:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    banner:SetBackdropColor(pr * 0.15, pg * 0.15, pb * 0.15, 0.9)
-    banner:SetBackdropBorderColor(pr, pg, pb, 0.6)
+    ApplyStyle(banner, pr * 0.15, pg * 0.15, pb * 0.15, 0.9, pr, pg, pb, 0.6)
     
     local bannerText = banner:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     bannerText:SetPoint("CENTER", banner, "CENTER", 0, 0)
@@ -117,7 +111,7 @@ local function CreateMainFrame()
     banner.text = bannerText
     mainFrame.banner = banner
 
-    -- Controls Bar (Channel & Auto-announce)
+    -- Controls Bar
     local controlsBar = CreateFrame("Frame", nil, mainFrame)
     controlsBar:SetPoint("TOPLEFT", banner, "BOTTOMLEFT", 0, -8)
     controlsBar:SetPoint("TOPRIGHT", banner, "BOTTOMRIGHT", 0, -8)
@@ -128,17 +122,10 @@ local function CreateMainFrame()
     channelLabel:SetText(L["CHAT_CHANNEL"])
 
     -- Channel Dropdown Button
-    local chanBtn = CreateFrame("Button", "KeyRouletteChanDropdown", controlsBar, "BackdropTemplate")
+    local chanBtn = CreateFrame("Button", "KeyRouletteChanDropdown", controlsBar, template)
     chanBtn:SetSize(110, 22)
     chanBtn:SetPoint("LEFT", channelLabel, "RIGHT", 6, 0)
-    chanBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    chanBtn:SetBackdropColor(0.08, 0.08, 0.10, 1)
-    chanBtn:SetBackdropBorderColor(0.25, 0.25, 0.30, 1)
+    ApplyStyle(chanBtn, 0.08, 0.08, 0.10, 1, 0.25, 0.25, 0.30, 1)
     
     local chanText = chanBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     chanText:SetPoint("CENTER", chanBtn, "CENTER", 0, 0)
@@ -159,37 +146,34 @@ local function CreateMainFrame()
             KeyRouletteDB.announceChannel = channels[nextIdx]
         end
         chanText:SetText(channels[nextIdx])
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+        pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
     end)
 
     -- Auto Announce Checkbox
-    local autoCheck = CreateFrame("CheckButton", nil, controlsBar, "UICheckButtonTemplate")
-    autoCheck:SetSize(22, 22)
+    local autoCheck = CreateFrame("CheckButton", nil, controlsBar)
+    autoCheck:SetSize(20, 20)
     autoCheck:SetPoint("RIGHT", controlsBar, "RIGHT", -4, 0)
+    autoCheck:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+    autoCheck:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
+    autoCheck:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight")
+    autoCheck:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
     autoCheck:SetChecked(KeyRouletteDB and KeyRouletteDB.autoAnnounce)
     autoCheck:SetScript("OnClick", function(self)
         if KeyRouletteDB then
             KeyRouletteDB.autoAnnounce = self:GetChecked()
         end
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+        pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
     end)
     
     local autoText = controlsBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     autoText:SetPoint("RIGHT", autoCheck, "LEFT", -2, 0)
     autoText:SetText("Auto-Chat")
 
-    -- Big Spin Action Button (EllesmereUI Accent Style)
-    local spinBtn = CreateFrame("Button", nil, mainFrame, "BackdropTemplate")
+    -- Big Spin Action Button
+    local spinBtn = CreateFrame("Button", nil, mainFrame, template)
     spinBtn:SetSize(392, 40)
     spinBtn:SetPoint("BOTTOM", mainFrame, "BOTTOM", 0, 14)
-    spinBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    spinBtn:SetBackdropColor(pr * 0.25, pg * 0.25, pb * 0.25, 0.95)
-    spinBtn:SetBackdropBorderColor(pr, pg, pb, 1)
+    ApplyStyle(spinBtn, pr * 0.25, pg * 0.25, pb * 0.25, 0.95, pr, pg, pb, 1)
 
     local spinText = spinBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     spinText:SetPoint("CENTER", spinBtn, "CENTER", 0, 0)
@@ -197,10 +181,10 @@ local function CreateMainFrame()
     spinBtn.text = spinText
 
     spinBtn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(pr * 0.4, pg * 0.4, pb * 0.4, 1)
+        ApplyStyle(self, pr * 0.4, pg * 0.4, pb * 0.4, 1, pr, pg, pb, 1)
     end)
     spinBtn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(pr * 0.25, pg * 0.25, pb * 0.25, 0.95)
+        ApplyStyle(self, pr * 0.25, pg * 0.25, pb * 0.25, 0.95, pr, pg, pb, 1)
     end)
     spinBtn:SetScript("OnClick", function()
         KR:StartRouletteSpin()
@@ -215,22 +199,20 @@ KR.CreateMainFrame = CreateMainFrame
 
 -- Create Party Member Card Row
 local function CreateMemberRow(parent, index)
-    local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    local template = BackdropTemplateMixin and "BackdropTemplate" or nil
+    local row = CreateFrame("Frame", nil, parent, template)
     row:SetSize(384, 50)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", 4, -4 - ((index - 1) * 56))
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    row:SetBackdropColor(0.08, 0.08, 0.10, 0.9)
-    row:SetBackdropBorderColor(0.18, 0.18, 0.22, 1)
+    ApplyStyle(row, 0.08, 0.08, 0.10, 0.9, 0.18, 0.18, 0.22, 1)
 
     -- Exclude Checkbox
-    local excludeCheck = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-    excludeCheck:SetSize(20, 20)
+    local excludeCheck = CreateFrame("CheckButton", nil, row)
+    excludeCheck:SetSize(18, 18)
     excludeCheck:SetPoint("LEFT", row, "LEFT", 6, 0)
+    excludeCheck:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+    excludeCheck:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
+    excludeCheck:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight")
+    excludeCheck:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
     excludeCheck:SetChecked(true)
     row.excludeCheck = excludeCheck
 
@@ -262,17 +244,10 @@ local function CreateMemberRow(parent, index)
     row.keyText = keyText
 
     -- Edit Button
-    local editBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
+    local editBtn = CreateFrame("Button", nil, row, template)
     editBtn:SetSize(34, 22)
     editBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-    editBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    editBtn:SetBackdropColor(0.14, 0.14, 0.18, 1)
-    editBtn:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
+    ApplyStyle(editBtn, 0.14, 0.14, 0.18, 1, 0.3, 0.3, 0.35, 1)
     
     local editBtnText = editBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     editBtnText:SetPoint("CENTER", editBtn, "CENTER", 0, 0)
@@ -313,7 +288,7 @@ function KR:OnGroupUpdated()
                 row.keyText:SetText("|cff00ffcc+" .. member.key.level .. "|r " .. (member.key.dungeonName or "Unknown"))
                 row.excludeCheck:SetEnabled(true)
             else
-                row.icon:SetTexture(134400) -- Question mark icon
+                row.icon:SetTexture(134400)
                 row.keyText:SetText("|cff888888" .. L["NO_KEY_DETECTED"] .. "|r")
                 row.excludeCheck:SetEnabled(false)
             end
@@ -331,20 +306,14 @@ end
 -- Manual Key Selector Popup Modal
 function KR:ShowManualEditModal(member)
     local pr, pg, pb, phex = KR:GetPlayerClassColor()
+    local template = BackdropTemplateMixin and "BackdropTemplate" or nil
 
     if not manualModal then
-        manualModal = CreateFrame("Frame", "KeyRouletteManualModal", UIParent, "BackdropTemplate")
+        manualModal = CreateFrame("Frame", "KeyRouletteManualModal", UIParent, template)
         manualModal:SetSize(320, 220)
         manualModal:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         manualModal:SetFrameStrata("DIALOG")
-        manualModal:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            tile = false, tileSize = 0, edgeSize = 1,
-            insets = { left = 0, right = 0, top = 0, bottom = 0 }
-        })
-        manualModal:SetBackdropColor(0.06, 0.06, 0.08, 0.98)
-        manualModal:SetBackdropBorderColor(pr, pg, pb, 1)
+        ApplyStyle(manualModal, 0.06, 0.06, 0.08, 0.98, pr, pg, pb, 1)
 
         local mTitle = manualModal:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         mTitle:SetPoint("TOP", manualModal, "TOP", 0, -12)
@@ -356,12 +325,14 @@ function KR:ShowManualEditModal(member)
         lvlLabel:SetPoint("TOPLEFT", manualModal, "TOPLEFT", 20, -50)
         lvlLabel:SetText("Key Level (2-30):")
 
-        local lvlInput = CreateFrame("EditBox", nil, manualModal, "InputBoxTemplate")
+        local lvlInput = CreateFrame("EditBox", nil, manualModal)
         lvlInput:SetSize(60, 22)
         lvlInput:SetPoint("LEFT", lvlLabel, "RIGHT", 10, 0)
+        lvlInput:SetFontObject("GameFontHighlight")
         lvlInput:SetNumeric(true)
         lvlInput:SetMaxLetters(2)
         lvlInput:SetAutoFocus(false)
+        ApplyStyle(lvlInput, 0.12, 0.12, 0.15, 1, 0.3, 0.3, 0.35, 1)
         manualModal.lvlInput = lvlInput
 
         -- Dungeon Select Label
@@ -369,25 +340,20 @@ function KR:ShowManualEditModal(member)
         dungLabel:SetPoint("TOPLEFT", manualModal, "TOPLEFT", 20, -90)
         dungLabel:SetText("Select Dungeon:")
 
-        local dungInput = CreateFrame("EditBox", nil, manualModal, "InputBoxTemplate")
+        local dungInput = CreateFrame("EditBox", nil, manualModal)
         dungInput:SetSize(260, 22)
         dungInput:SetPoint("TOPLEFT", dungLabel, "BOTTOMLEFT", 0, -8)
+        dungInput:SetFontObject("GameFontHighlight")
         dungInput:SetAutoFocus(false)
         dungInput:SetText("Ara-Kara, City of Echoes")
+        ApplyStyle(dungInput, 0.12, 0.12, 0.15, 1, 0.3, 0.3, 0.35, 1)
         manualModal.dungInput = dungInput
 
         -- Save Button
-        local saveBtn = CreateFrame("Button", nil, manualModal, "BackdropTemplate")
+        local saveBtn = CreateFrame("Button", nil, manualModal, template)
         saveBtn:SetSize(100, 26)
         saveBtn:SetPoint("BOTTOMLEFT", manualModal, "BOTTOMLEFT", 30, 16)
-        saveBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            tile = false, tileSize = 0, edgeSize = 1,
-            insets = { left = 0, right = 0, top = 0, bottom = 0 }
-        })
-        saveBtn:SetBackdropColor(pr * 0.3, pg * 0.3, pb * 0.3, 1)
-        saveBtn:SetBackdropBorderColor(pr, pg, pb, 1)
+        ApplyStyle(saveBtn, pr * 0.3, pg * 0.3, pb * 0.3, 1, pr, pg, pb, 1)
         local st = saveBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         st:SetPoint("CENTER", saveBtn, "CENTER", 0, 0)
         st:SetText("Save")
@@ -408,21 +374,14 @@ function KR:ShowManualEditModal(member)
                 KR:UpdateGroupRoster()
             end
             manualModal:Hide()
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+            pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
         end)
 
         -- Cancel Button
-        local cancelBtn = CreateFrame("Button", nil, manualModal, "BackdropTemplate")
+        local cancelBtn = CreateFrame("Button", nil, manualModal, template)
         cancelBtn:SetSize(100, 26)
         cancelBtn:SetPoint("BOTTOMRIGHT", manualModal, "BOTTOMRIGHT", -30, 16)
-        cancelBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Buttons\\WHITE8X8",
-            tile = false, tileSize = 0, edgeSize = 1,
-            insets = { left = 0, right = 0, top = 0, bottom = 0 }
-        })
-        cancelBtn:SetBackdropColor(0.15, 0.15, 0.18, 1)
-        cancelBtn:SetBackdropBorderColor(0.3, 0.3, 0.35, 1)
+        ApplyStyle(cancelBtn, 0.15, 0.15, 0.18, 1, 0.3, 0.3, 0.35, 1)
         local ct = cancelBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         ct:SetPoint("CENTER", cancelBtn, "CENTER", 0, 0)
         ct:SetText("Cancel")
@@ -431,7 +390,7 @@ function KR:ShowManualEditModal(member)
 
     manualModal.targetMember = member
     manualModal.title:SetText("|c" .. phex .. "Manual Key: " .. (member.name or "Player") .. "|r")
-    manualModal.lvlInput:SetText(member.key and member.key.level or "10")
+    manualModal.lvlInput:SetText(tostring(member.key and member.key.level or "10"))
     manualModal.dungInput:SetText(member.key and member.key.dungeonName or "Ara-Kara, City of Echoes")
     manualModal:Show()
 end
@@ -455,9 +414,9 @@ function KR:StartRouletteSpin()
 
     if #activeMembers == 0 then
         if mainFrame and mainFrame.banner then
-            mainFrame.banner.text:SetText("|cffff4444" .. L["NO_KEYS_FOUND"] .. "|r")
+            mainFrame.banner.text:SetText("|cffffaa00No keys found! Click 'Edit' to add a key.|r")
         end
-        PlaySound(SOUNDKIT.IG_PLAYER_DEAD or 895)
+        pcall(PlaySound, SOUNDKIT.IG_PLAYER_DEAD or 895)
         return
     end
 
@@ -479,8 +438,7 @@ function KR:StartRouletteSpin()
         -- Reset Row Borders
         for i = 1, 5 do
             if memberRows[i] then
-                memberRows[i]:SetBackdropBorderColor(0.18, 0.18, 0.22, 1)
-                memberRows[i]:SetBackdropColor(0.08, 0.08, 0.10, 0.9)
+                ApplyStyle(memberRows[i], 0.08, 0.08, 0.10, 0.9, 0.18, 0.18, 0.22, 1)
             end
         end
 
@@ -488,15 +446,13 @@ function KR:StartRouletteSpin()
         local activeRow = memberRows[currentCandidate.rowIndex]
 
         if activeRow then
-            activeRow:SetBackdropBorderColor(pr, pg, pb, 1)
-            activeRow:SetBackdropColor(pr * 0.2, pg * 0.2, pb * 0.2, 0.95)
+            ApplyStyle(activeRow, pr * 0.2, pg * 0.2, pb * 0.2, 0.95, pr, pg, pb, 1)
         end
 
-        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+        pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
 
         step = step + 1
         if step <= totalTicks then
-            -- Decelerate timing towards end
             if step > (totalTicks - 8) then
                 tickDelay = tickDelay + 0.04
             elseif step > (totalTicks - 15) then
@@ -507,22 +463,20 @@ function KR:StartRouletteSpin()
             -- Finish Spin! Highlight Winner
             for i = 1, 5 do
                 if memberRows[i] then
-                    memberRows[i]:SetBackdropBorderColor(0.18, 0.18, 0.22, 1)
-                    memberRows[i]:SetBackdropColor(0.08, 0.08, 0.10, 0.9)
+                    ApplyStyle(memberRows[i], 0.08, 0.08, 0.10, 0.9, 0.18, 0.18, 0.22, 1)
                 end
             end
 
             local winningRow = memberRows[activeMembers[winnerIndex].rowIndex]
             if winningRow then
-                winningRow:SetBackdropBorderColor(1, 0.84, 0, 1) -- Golden Winner Glow
-                winningRow:SetBackdropColor(0.3, 0.25, 0.05, 0.95)
+                ApplyStyle(winningRow, 0.3, 0.25, 0.05, 0.95, 1, 0.84, 0, 1)
             end
 
             if mainFrame and mainFrame.banner then
                 mainFrame.banner.text:SetText("|cffffd700🏆 WINNER: " .. (winner.name or "Player") .. " (+" .. winner.key.level .. " " .. winner.key.dungeonName .. ")|r")
             end
 
-            PlaySound(SOUNDKIT.UI_EPICLOOT_TOAST or 31578)
+            pcall(PlaySound, SOUNDKIT.UI_EPICLOOT_TOAST or 31578)
 
             -- Announce
             if KeyRouletteDB and KeyRouletteDB.autoAnnounce then
@@ -543,8 +497,9 @@ end
 -- Create Minimap Button
 local function CreateMinimapButton()
     local pr, pg, pb = KR:GetPlayerClassColor()
+    local template = BackdropTemplateMixin and "BackdropTemplate" or nil
 
-    local btn = CreateFrame("Button", "KeyRouletteMinimapButton", Minimap, "BackdropTemplate")
+    local btn = CreateFrame("Button", "KeyRouletteMinimapButton", Minimap, template)
     btn:SetSize(32, 32)
     btn:SetFrameStrata("MEDIUM")
     btn:SetPoint("CENTER", Minimap, "CENTER", -60, -60)
@@ -552,19 +507,12 @@ local function CreateMinimapButton()
     btn:EnableMouse(true)
     btn:RegisterForClicks("AnyUp")
 
-    btn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8",
-        tile = false, tileSize = 0, edgeSize = 1,
-        insets = { left = 0, right = 0, top = 0, bottom = 0 }
-    })
-    btn:SetBackdropColor(0.06, 0.06, 0.08, 0.95)
-    btn:SetBackdropBorderColor(pr, pg, pb, 1)
+    ApplyStyle(btn, 0.06, 0.06, 0.08, 0.95, pr, pg, pb, 1)
 
     local icon = btn:CreateTexture(nil, "ARTWORK")
     icon:SetSize(20, 20)
     icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
-    icon:SetTexture(5254320) -- Mythic Keystone Texture
+    icon:SetTexture(5254320)
 
     btn:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
