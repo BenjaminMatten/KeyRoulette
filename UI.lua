@@ -8,12 +8,12 @@ local spinTicker
 local isSpinning = false
 local manualModal
 
--- Acquire Class Color
-local pr, pg, pb, phex, pclass = KR:GetPlayerClassColor()
-
 -- Create Main UI Frame
 local function CreateMainFrame()
     if mainFrame then return mainFrame end
+
+    -- Fetch Class Color dynamically for current character
+    local pr, pg, pb, phex, pclass = KR:GetPlayerClassColor()
 
     mainFrame = CreateFrame("Frame", "KeyRouletteMainFrame", UIParent, "BackdropTemplate")
     mainFrame:SetSize(420, 490)
@@ -21,9 +21,12 @@ local function CreateMainFrame()
     mainFrame:SetMovable(true)
     mainFrame:EnableMouse(true)
     mainFrame:RegisterForDrag("LeftButton")
-    mainFrame:SetScript("OnDragStart", mainFrame.StartMoving)
-    mainFrame:SetScript("OnDragStop", mainFrame.StopMovingOrSizing)
+    mainFrame:SetScript("OnDragStart", function(self) self:StartMoving() end)
+    mainFrame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     mainFrame:SetFrameStrata("HIGH")
+
+    -- Hide initially so it opens via /kr or minimap button
+    mainFrame:Hide()
 
     -- EllesmereUI Backdrop: Dark Slate with 1px border
     mainFrame:SetBackdrop({
@@ -47,7 +50,6 @@ local function CreateMainFrame()
     local title = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     title:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 16, -14)
     title:SetText("|c" .. phex .. "KEY ROULETTE|r")
-    title:SetFont("Fonts\\FRIZQT__.TTF", 15, "OUTLINE")
 
     -- Subtitle
     local subtitle = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -140,12 +142,12 @@ local function CreateMainFrame()
     
     local chanText = chanBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     chanText:SetPoint("CENTER", chanBtn, "CENTER", 0, 0)
-    chanText:SetText(KeyRouletteDB.announceChannel or "PARTY")
+    chanText:SetText((KeyRouletteDB and KeyRouletteDB.announceChannel) or "PARTY")
     chanBtn.text = chanText
 
     chanBtn:SetScript("OnClick", function(self)
         local channels = { "PARTY", "RAID", "SAY", "INSTANCE_CHAT", "SELF" }
-        local cur = KeyRouletteDB.announceChannel or "PARTY"
+        local cur = (KeyRouletteDB and KeyRouletteDB.announceChannel) or "PARTY"
         local nextIdx = 1
         for i, c in ipairs(channels) do
             if c == cur then
@@ -153,7 +155,9 @@ local function CreateMainFrame()
                 break
             end
         end
-        KeyRouletteDB.announceChannel = channels[nextIdx]
+        if KeyRouletteDB then
+            KeyRouletteDB.announceChannel = channels[nextIdx]
+        end
         chanText:SetText(channels[nextIdx])
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
     end)
@@ -162,9 +166,11 @@ local function CreateMainFrame()
     local autoCheck = CreateFrame("CheckButton", nil, controlsBar, "UICheckButtonTemplate")
     autoCheck:SetSize(22, 22)
     autoCheck:SetPoint("RIGHT", controlsBar, "RIGHT", -4, 0)
-    autoCheck:SetChecked(KeyRouletteDB.autoAnnounce)
+    autoCheck:SetChecked(KeyRouletteDB and KeyRouletteDB.autoAnnounce)
     autoCheck:SetScript("OnClick", function(self)
-        KeyRouletteDB.autoAnnounce = self:GetChecked()
+        if KeyRouletteDB then
+            KeyRouletteDB.autoAnnounce = self:GetChecked()
+        end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
     end)
     
@@ -188,7 +194,6 @@ local function CreateMainFrame()
     local spinText = spinBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     spinText:SetPoint("CENTER", spinBtn, "CENTER", 0, 0)
     spinText:SetText("|c" .. phex .. L["SPIN_BUTTON"] .. "|r")
-    spinText:SetFont("Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
     spinBtn.text = spinText
 
     spinBtn:SetScript("OnEnter", function(self)
@@ -205,6 +210,8 @@ local function CreateMainFrame()
     KR.UIFrame = mainFrame
     return mainFrame
 end
+
+KR.CreateMainFrame = CreateMainFrame
 
 -- Create Party Member Card Row
 local function CreateMemberRow(parent, index)
@@ -298,7 +305,7 @@ function KR:OnGroupUpdated()
 
             -- Class Color Name
             local cr, cg, cb, chex = KR:GetUnitClassColor(member.unit)
-            row.nameText:SetText("|c" .. chex .. member.name .. "|r")
+            row.nameText:SetText("|c" .. chex .. (member.name or "Player") .. "|r")
 
             -- Key info
             if member.key and member.key.level and member.key.level > 0 then
@@ -323,6 +330,8 @@ end
 
 -- Manual Key Selector Popup Modal
 function KR:ShowManualEditModal(member)
+    local pr, pg, pb, phex = KR:GetPlayerClassColor()
+
     if not manualModal then
         manualModal = CreateFrame("Frame", "KeyRouletteManualModal", UIParent, "BackdropTemplate")
         manualModal:SetSize(320, 220)
@@ -421,7 +430,7 @@ function KR:ShowManualEditModal(member)
     end
 
     manualModal.targetMember = member
-    manualModal.title:SetText("|c" .. phex .. "Manual Key: " .. member.name .. "|r")
+    manualModal.title:SetText("|c" .. phex .. "Manual Key: " .. (member.name or "Player") .. "|r")
     manualModal.lvlInput:SetText(member.key and member.key.level or "10")
     manualModal.dungInput:SetText(member.key and member.key.dungeonName or "Ara-Kara, City of Echoes")
     manualModal:Show()
@@ -430,6 +439,7 @@ end
 -- Roulette Spin Wheel Animation & Selection Logic
 function KR:StartRouletteSpin()
     if isSpinning then return end
+    local pr, pg, pb, phex = KR:GetPlayerClassColor()
 
     local activeMembers = {}
     local members = KR.currentMembers or {}
@@ -509,13 +519,13 @@ function KR:StartRouletteSpin()
             end
 
             if mainFrame and mainFrame.banner then
-                mainFrame.banner.text:SetText("|cffffd700🏆 WINNER: " .. winner.name .. " (+" .. winner.key.level .. " " .. winner.key.dungeonName .. ")|r")
+                mainFrame.banner.text:SetText("|cffffd700🏆 WINNER: " .. (winner.name or "Player") .. " (+" .. winner.key.level .. " " .. winner.key.dungeonName .. ")|r")
             end
 
             PlaySound(SOUNDKIT.UI_EPICLOOT_TOAST or 31578)
 
             -- Announce
-            if KeyRouletteDB.autoAnnounce then
+            if KeyRouletteDB and KeyRouletteDB.autoAnnounce then
                 KR:AnnounceWinner(winner)
             end
 
@@ -532,6 +542,8 @@ end
 
 -- Create Minimap Button
 local function CreateMinimapButton()
+    local pr, pg, pb = KR:GetPlayerClassColor()
+
     local btn = CreateFrame("Button", "KeyRouletteMinimapButton", Minimap, "BackdropTemplate")
     btn:SetSize(32, 32)
     btn:SetFrameStrata("MEDIUM")
@@ -563,12 +575,7 @@ local function CreateMinimapButton()
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     btn:SetScript("OnClick", function()
-        if mainFrame then
-            mainFrame:SetShown(not mainFrame:IsShown())
-        else
-            CreateMainFrame():Show()
-            KR:UpdateGroupRoster()
-        end
+        KR:ToggleUI()
     end)
 end
 

@@ -33,5 +33,4 @@ Mythic+ AddOn for World of Warcraft to help choose a key
 1. Copy the `key_roulette` folder into your World of Warcraft AddOns directory:
    - **Retail**: `World of Warcraft\_retail_\Interface\AddOns\key_roulette`
 2. Restart or reload World of Warcraft (`/reload`).
-3. Open the UI using `/kr` or by clicking the Minimap icon.
->>>>>>> 7936ab3 (First commit)
+

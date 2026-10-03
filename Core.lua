@@ -4,6 +4,13 @@ local addonName, KR = ...
 -- Global Table
 _G["KeyRoulette"] = KR
 
+KeyRouletteDB = KeyRouletteDB or {
+    announceChannel = "PARTY",
+    autoAnnounce = true,
+    showMinimap = true,
+    customFormat = "🎲 Key Roulette picked: %s's +%d %s!",
+}
+
 KR.frame = CreateFrame("Frame")
 KR.groupMembers = {}
 KR.manualKeys = {}
@@ -21,7 +28,7 @@ KR.frame:RegisterEvent("CHAT_MSG_ADDON")
 -- Class Colors Helper
 function KR:GetPlayerClassColor()
     local _, classFilename = UnitClass("player")
-    local color = (CUSTOM_CLASS_COLORS and CUSTOM_CLASS_COLORS[classFilename]) or RAID_CLASS_COLORS[classFilename]
+    local color = (CUSTOM_CLASS_COLORS and CUSTOM_CLASS_COLORS[classFilename]) or (classFilename and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFilename])
     if color then
         local hex = string.format("ff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
         return color.r, color.g, color.b, hex, classFilename
@@ -34,7 +41,7 @@ function KR:GetUnitClassColor(unit)
         return 0.8, 0.8, 0.8, "ffcccccc", "PRIEST"
     end
     local _, classFilename = UnitClass(unit)
-    local color = (CUSTOM_CLASS_COLORS and CUSTOM_CLASS_COLORS[classFilename]) or RAID_CLASS_COLORS[classFilename]
+    local color = (CUSTOM_CLASS_COLORS and CUSTOM_CLASS_COLORS[classFilename]) or (classFilename and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFilename])
     if color then
         local hex = string.format("ff%02x%02x%02x", color.r * 255, color.g * 255, color.b * 255)
         return color.r, color.g, color.b, hex, classFilename
@@ -144,7 +151,7 @@ function KR:UpdateGroupRoster()
     KR:ScanPlayerKeystone()
     local members = {}
 
-    local playerName = UnitName("player")
+    local playerName = UnitName("player") or "Player"
     local _, playerClass = UnitClass("player")
     local playerRole = UnitGroupRolesAssigned("player") or "NONE"
 
@@ -194,7 +201,6 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         local loadedAddon = ...
         if loadedAddon == addonName then
-            -- SavedVariables Init
             KeyRouletteDB = KeyRouletteDB or {}
             KeyRouletteDB.announceChannel = KeyRouletteDB.announceChannel or "PARTY"
             if KeyRouletteDB.autoAnnounce == nil then KeyRouletteDB.autoAnnounce = true end
@@ -224,8 +230,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, message, channel, sender = ...
         if prefix == "KeyRoulette" then
-            -- Strip realm name from sender if present
-            local senderName = Ambiguate and Ambiguate(sender, "none") or sender:match("([^-]+)") or sender
+            local senderName = (Ambiguate and Ambiguate(sender, "none")) or sender:match("([^-]+)") or sender
 
             if message == "PING" then
                 KR:BroadcastKeystone()
@@ -254,10 +259,10 @@ end)
 function KR:AnnounceWinner(winner)
     if not winner or not winner.key then return end
     local key = winner.key
-    local fmt = KeyRouletteDB.customFormat or "🎲 Key Roulette picked: %s's +%d %s!"
+    local fmt = (KeyRouletteDB and KeyRouletteDB.customFormat) or "🎲 Key Roulette picked: %s's +%d %s!"
     local msg = string.format(fmt, winner.name, key.level, key.dungeonName)
 
-    local channel = KeyRouletteDB.announceChannel or "PARTY"
+    local channel = (KeyRouletteDB and KeyRouletteDB.announceChannel) or "PARTY"
 
     if channel == "SELF" then
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r " .. msg)
@@ -270,25 +275,42 @@ function KR:AnnounceWinner(winner)
     elseif channel == "INSTANCE_CHAT" and IsInGroup() then
         SendChatMessage(msg, "INSTANCE_CHAT")
     else
-        -- Fallback to local frame if not in group for specified channel
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r " .. msg)
     end
 end
 
--- Slash Commands
+-- Toggle UI Function
+function KR:ToggleUI()
+    if not KR.UIFrame then
+        if KR.CreateMainFrame then
+            KR:CreateMainFrame()
+        end
+    end
+
+    if KR.UIFrame then
+        if KR.UIFrame:IsShown() then
+            KR.UIFrame:Hide()
+        else
+            KR:UpdateGroupRoster()
+            KR.UIFrame:Show()
+        end
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r Could not initialize UI frame.")
+    end
+end
+
+-- Register Slash Commands
 SLASH_KEYROULETTE1 = "/kr"
 SLASH_KEYROULETTE2 = "/keyroulette"
 SLASH_KEYROULETTE3 = "/keyr"
 
 SlashCmdList["KEYROULETTE"] = function(msg)
-    msg = msg and msg:lower() or ""
+    msg = (msg and msg:gsub("^%s*(.-)%s*$", "%1"):lower()) or ""
     if msg == "spin" then
         if KR.StartRouletteSpin then
             KR:StartRouletteSpin()
         end
     else
-        if KR.UIFrame then
-            KR.UIFrame:SetShown(not KR.UIFrame:IsShown())
-        end
+        KR:ToggleUI()
     end
 end
