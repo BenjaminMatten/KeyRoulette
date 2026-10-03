@@ -221,14 +221,20 @@ function KR:FindPartyMemberKey(unit, name)
             return saved
         end
     end
-    -- 4. Check EUIKeysPopup / EllesmereUI / EUI
-    if _G.EUIKeysPopup or _G.EllesmereUI or _G.EllesmereUIDB or _G.EUIKeys then
+    -- 4. Check EllesmereUIDB.keystonePopup / EllesmereUI / EUIKeysPopup
+    if _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys then
         pcall(function()
-            local eui = _G.EUIKeysPopup or _G.EUIKeys or _G.EllesmereUI or _G.EllesmereUIDB
-            if eui then
+            local eui = _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys
+            if _G.EllesmereUIDB and _G.EllesmereUIDB.keystonePopup then
+                local mID, lvl = DeepSearchTable(_G.EllesmereUIDB.keystonePopup, searchNames, 0)
+                if mID and lvl then
+                    KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
+                end
+            end
+            if not KR.groupMembers[name] and eui then
                 local mID, lvl = DeepSearchTable(eui, searchNames, 0)
                 if mID and lvl then
-                    KR:SaveMemberKey(name, mID, lvl, "EllesmereUI (EUIKeys)")
+                    KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
                 end
             end
         end)
@@ -470,13 +476,25 @@ function KR:RunDebug()
     if _G.EllesmereUIDB then
         AddLog("=== EllesmereUIDB Table Dump ===")
         pcall(function()
-            for k, v in pairs(_G.EllesmereUIDB) do
-                if type(k) == "string" and (k:lower():find("key") or k:lower():find("party") or k:lower():find("roster")) then
-                    AddLog("  EllesmereUIDB." .. tostring(k) .. " = " .. tostring(v))
+            if _G.EllesmereUIDB.keystonePopup and type(_G.EllesmereUIDB.keystonePopup) == "table" then
+                AddLog("  [EllesmereUIDB.keystonePopup Contents]:")
+                for k, v in pairs(_G.EllesmereUIDB.keystonePopup) do
+                    AddLog("    keystonePopup[" .. tostring(k) .. "] = " .. tostring(v))
                     if type(v) == "table" then
                         for k2, v2 in pairs(v) do
-                            AddLog("    EllesmereUIDB." .. tostring(k) .. "." .. tostring(k2) .. " = " .. tostring(v2))
+                            AddLog("      [" .. tostring(k2) .. "] = " .. tostring(v2))
+                            if type(v2) == "table" then
+                                for k3, v3 in pairs(v2) do
+                                    AddLog("        [" .. tostring(k3) .. "] = " .. tostring(v3))
+                                end
+                            end
                         end
+                    end
+                end
+            else
+                for k, v in pairs(_G.EllesmereUIDB) do
+                    if type(k) == "string" and (k:lower():find("key") or k:lower():find("party") or k:lower():find("roster")) then
+                        AddLog("  EllesmereUIDB." .. tostring(k) .. " = " .. tostring(v))
                     end
                 end
             end
