@@ -814,13 +814,52 @@ function KR:ScanGuildRosterKeys()
     end)
 end
 
--- Helper function to safely send addon messages with channel verification
+-- Queue and delay manager to enforce WoW client chat rate limits
+local sendQueue = {}
+local isProcessingQueue = false
+
+local function ProcessSendQueue()
+    if #sendQueue == 0 then
+        isProcessingQueue = false
+        return
+    end
+
+    isProcessingQueue = true
+    local item = table.remove(sendQueue, 1)
+
+    if item then
+        local prefix, text, targetChan = item.prefix, item.text, item.targetChan
+        if targetChan and ((targetChan == "PARTY" and IsInGroup()) or (targetChan == "RAID" and IsInRaid()) or (targetChan == "GUILD" and IsInGuild())) then
+            pcall(C_ChatInfo.SendAddonMessage, prefix, text, targetChan)
+        end
+    end
+
+    if #sendQueue > 0 then
+        C_Timer.After(0.15, ProcessSendQueue)
+    else
+        isProcessingQueue = false
+    end
+end
+
+-- Helper function to safely send addon messages with channel verification and queue throttling
 local function SafeSendAddonMsg(prefix, text, targetChan)
     if not targetChan then return end
     if (targetChan == "PARTY" or targetChan == "RAID") and not IsInGroup() then return end
     if targetChan == "RAID" and not IsInRaid() then return end
     if targetChan == "GUILD" and not IsInGuild() then return end
-    pcall(C_ChatInfo.SendAddonMessage, prefix, text, targetChan)
+
+    -- Deduplicate identical queued messages
+    for _, item in ipairs(sendQueue) do
+        if item.prefix == prefix and item.text == text and item.targetChan == targetChan then
+            return
+        end
+    end
+
+    table.insert(sendQueue, { prefix = prefix, text = text, targetChan = targetChan })
+
+    if not isProcessingQueue then
+        ProcessSendQueue()
+    end
 end
 
 -- Broadcast Self Keystone to Party & Guild
@@ -842,8 +881,6 @@ function KR:BroadcastKeystone()
     for _, targetChan in ipairs(channels) do
         SafeSendAddonMsg("KeyRoulette", string.format("KEY:%d:%d:%s", key.mapID, key.level, key.dungeonName or ""), targetChan)
         SafeSendAddonMsg("EllesmereUI", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
-        SafeSendAddonMsg("LibOpenKeystone", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
-        SafeSendAddonMsg("LibTomoKeystoneSync", string.format("KEY:%d:%d", key.mapID, key.level), targetChan)
         SafeSendAddonMsg("LibOpenRaid", string.format("KEY,%d,%d", key.mapID, key.level), targetChan)
     end
 end
@@ -861,61 +898,22 @@ function KR:RequestGroupKeystones()
     end
 
     if #channels > 0 then
-        -- Invoke EllesmereUI functions
-        local eui = _G.EllesmereUI or _G.Ellesmere
-        if eui then
-            pcall(function()
-                if eui.RequestKeystones then eui:RequestKeystones() end
-                if eui.SyncKeystones then eui:SyncKeystones() end
-            end)
-        end
+        -- Invoke external libraries safely
+        pcall(function()
+            local eui = _G.EllesmereUI or _G.Ellesmere
+            if eui and eui.RequestKeystones then eui:RequestKeystones() end
 
-        -- Invoke LibOpenKeystone functions
-        local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
-        if lok then
-            pcall(function()
-                if lok.RequestKeystones then lok:RequestKeystones() end
-                if lok.SendKeystone then lok:SendKeystone() end
-            end)
-        end
+            local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
+            if lor and lor.RequestKeystoneInfo then lor:RequestKeystoneInfo() end
 
-        -- Invoke LibOpenRaid functions
-        local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
-        if lor then
-            pcall(function()
-                if lor.RequestKeystoneInfo then lor:RequestKeystoneInfo() end
-                if lor.SendKeystoneInfo then lor:SendKeystoneInfo() end
-                if lor.RequestAllAlliesData then lor:RequestAllAlliesData() end
-            end)
-        end
+            local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
+            if lok and lok.RequestKeystones then lok:RequestKeystones() end
+        end)
 
-        -- Invoke LibTomoKeystoneSync functions
-        local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
-                  or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync
-        if tomo then
-            pcall(function()
-                if tomo.RequestKeystones then tomo:RequestKeystones() end
-                if tomo.RequestKeys then tomo:RequestKeys() end
-                if tomo.SendKeystone then tomo:SendKeystone() end
-                if tomo.Sync then tomo:Sync() end
-            end)
-        end
-
-        -- Invoke LibKeystone functions
-        local lks = LibStub and LibStub("LibKeystone-1.0", true)
-        if lks then
-            pcall(function()
-                if lks.RequestKeystones then lks:RequestKeystones() end
-                if lks.SendKeystone then lks:SendKeystone() end
-            end)
-        end
-
-        -- Send network pings to active channels
+        -- Send queued network pings to active channels with 150ms delay spacing
         for _, targetChan in ipairs(channels) do
             SafeSendAddonMsg("KeyRoulette", "PING", targetChan)
             SafeSendAddonMsg("EllesmereUI", "REQUEST", targetChan)
-            SafeSendAddonMsg("LibOpenKeystone", "REQUEST", targetChan)
-            SafeSendAddonMsg("LibTomoKeystoneSync", "REQUEST", targetChan)
             SafeSendAddonMsg("LibOpenRaid", "REQUEST_KEY", targetChan)
         end
     end
