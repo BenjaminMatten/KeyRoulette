@@ -59,7 +59,7 @@ local function RegisterLibraryCallbacks()
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor and lor.RegisterCallback then
         pcall(function()
-            lor:RegisterCallback("KeystoneUpdate", function() KR:UpdateGroupRoster() end)
+            lor:RegisterCallback("KeystoneUpdate", function() KR:ScheduleRosterUpdate(0.2) end)
         end)
     end
 
@@ -67,14 +67,14 @@ local function RegisterLibraryCallbacks()
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync
     if tomo and tomo.RegisterCallback then
         pcall(function()
-            tomo:RegisterCallback("KeystoneUpdate", function() KR:UpdateGroupRoster() end)
+            tomo:RegisterCallback("KeystoneUpdate", function() KR:ScheduleRosterUpdate(0.2) end)
         end)
     end
 
     local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
     if lok and lok.RegisterCallback then
         pcall(function()
-            lok:RegisterCallback("KeystoneUpdate", function() KR:UpdateGroupRoster() end)
+            lok:RegisterCallback("KeystoneUpdate", function() KR:ScheduleRosterUpdate(0.2) end)
         end)
     end
 end
@@ -313,25 +313,102 @@ end
 
 -- Deep Global Table Recursive Searcher (Finds keystone mapID + level for player name in any table)
 local function DeepSearchTable(tbl, searchNames, depth)
-    if not tbl or type(tbl) ~= "table" or (depth and depth > 4) then return nil, nil end
+    if not tbl or type(tbl) ~= "table" or (depth and depth > 5) then return nil, nil, nil end
     depth = (depth or 0) + 1
 
     for key, val in pairs(tbl) do
         if type(key) == "string" then
             for _, sName in ipairs(searchNames) do
-                if key == sName or key:lower() == sName:lower() or key:find(sName, 1, true) then
-                    local mID, lvl = ExtractMapAndLevel(val)
-                    if mID and lvl then return mID, lvl end
+                if sName and sName ~= "" and (key == sName or key:lower() == sName:lower() or key:find(sName, 1, true)) then
+                    local mID, lvl, dName = ExtractMapAndLevel(val)
+                    if mID and lvl then return mID, lvl, dName end
                 end
             end
         end
 
         if type(val) == "table" and key ~= "_G" and key ~= "KR" and key ~= "KeyRoulette" and key ~= "UIParent" and key ~= "WorldFrame" then
-            local mID, lvl = DeepSearchTable(val, searchNames, depth)
-            if mID and lvl then return mID, lvl end
+            local mID, lvl, dName = DeepSearchTable(val, searchNames, depth)
+            if mID and lvl then return mID, lvl, dName end
         end
     end
-    return nil, nil
+    return nil, nil, nil
+end
+
+-- UI Frame Node Scanner (Extracts key info from EllesmereUI & standard UI text elements)
+local function ScanFrameForMemberKey(parentFrame, searchNames)
+    if not parentFrame then return nil, nil, nil end
+
+    local function SearchFrameNode(f, depth)
+        if not f or depth > 6 then return nil, nil, nil end
+
+        local hasMemberName = false
+        local foundMapID, foundLevel, foundDungeonName
+
+        if f.GetRegions then
+            local regions = { f:GetRegions() }
+            for _, reg in ipairs(regions) do
+                if reg and reg.GetObjectType and reg:GetObjectType() == "FontString" then
+                    local text = reg:GetText()
+                    if text and type(text) == "string" and text ~= "" then
+                        for _, sName in ipairs(searchNames) do
+                            if sName and sName ~= "" then
+                                local sClean = sName:match("([^-]+)") or sName
+                                if text:find(sName, 1, true) or text:lower():find(sName:lower(), 1, true) or text:find(sClean, 1, true) or text:lower():find(sClean:lower(), 1, true) then
+                                    hasMemberName = true
+                                end
+                            end
+                        end
+                        local mID, lvl, dName = ExtractMapAndLevel(text)
+                        if mID and lvl then
+                            foundMapID, foundLevel, foundDungeonName = mID, lvl, dName
+                        end
+                    end
+                end
+            end
+        end
+
+        if hasMemberName and foundLevel then
+            return foundMapID or 507, foundLevel, foundDungeonName
+        end
+
+        if f.GetChildren then
+            local children = { f:GetChildren() }
+            for _, child in ipairs(children) do
+                local mID, lvl, dName = SearchFrameNode(child, depth + 1)
+                if mID and lvl then return mID, lvl, dName end
+            end
+        end
+
+        if hasMemberName and not foundLevel and f.GetChildren then
+            local function FindKeyInDescendants(cf, d)
+                if not cf or d > 4 then return nil, nil, nil end
+                if cf.GetRegions then
+                    for _, reg in ipairs({ cf:GetRegions() }) do
+                        if reg and reg.GetObjectType and reg:GetObjectType() == "FontString" then
+                            local txt = reg:GetText()
+                            if txt and type(txt) == "string" then
+                                local mID, lvl, dName = ExtractMapAndLevel(txt)
+                                if mID and lvl then return mID, lvl, dName end
+                            end
+                        end
+                    end
+                end
+                if cf.GetChildren then
+                    for _, child in ipairs({ cf:GetChildren() }) do
+                        local mID, lvl, dName = FindKeyInDescendants(child, d + 1)
+                        if mID and lvl then return mID, lvl, dName end
+                    end
+                end
+                return nil, nil, nil
+            end
+            local mID, lvl, dName = FindKeyInDescendants(f, 0)
+            if mID and lvl then return mID, lvl, dName end
+        end
+
+        return nil, nil, nil
+    end
+
+    return SearchFrameNode(parentFrame, 0)
 end
 
 -- Purge Stale RaiderIO Entries from SavedVariables and Cache
@@ -369,27 +446,34 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
     if KR.manualKeys[shortName] then return KR.manualKeys[shortName] end
     if KR.manualKeys[fullName] then return KR.manualKeys[fullName] end
 
-    -- 2. Check EllesmereUI / EUIKeysPopup / EllesmereUIDB / EUIKeys
-    if _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys or _G.EUI_Keys then
-        pcall(function()
-            local euiDB = _G.EllesmereUIDB or _G.EUIKeysPopup or _G.EUIKeys or _G.EUI_Keys
-            local mID, lvl, dName = CheckTableForMemberKey(euiDB, searchNames)
-            if not mID and _G.EllesmereUI then
-                mID, lvl, dName = CheckTableForMemberKey(_G.EllesmereUI, searchNames)
+    -- 2. Check EllesmereUI / EUIKeysPopup / EllesmereUIDB / EUIKeys / EUI
+    pcall(function()
+        local mID, lvl, dName
+        -- A. Check UI frame text elements first (EllesmereUI key popup windows)
+        local euiFrames = { _G.EUIKeysPopup, _G.EUIKeys, _G.EUI_Keys, _G.EllesmereUIFrame }
+        for _, frame in ipairs(euiFrames) do
+            if not mID and frame then
+                mID, lvl, dName = ScanFrameForMemberKey(frame, searchNames)
             end
-            if not mID and _G.EllesmereUIDB then
-                mID, lvl, dName = DeepSearchTable(_G.EllesmereUIDB, searchNames, 0)
-            end
-            if not mID and _G.EllesmereUI then
-                mID, lvl, dName = DeepSearchTable(_G.EllesmereUI, searchNames, 0)
-            end
-            if mID and lvl then
-                KR:SaveMemberKey(name, mID, lvl, "EllesmereUI", dName)
-            end
-        end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source == "EllesmereUI" then
-            return KR.groupMembers[name]
         end
+
+        -- B. Check EllesmereUI tables
+        local euiTables = { _G.EllesmereUIDB, _G.EllesmereUI, _G.EUIKeysPopup, _G.EUIKeys, _G.EUI_Keys, _G.EUI }
+        for _, euiTbl in ipairs(euiTables) do
+            if not mID and euiTbl and type(euiTbl) == "table" then
+                mID, lvl, dName = CheckTableForMemberKey(euiTbl, searchNames)
+                if not mID then
+                    mID, lvl, dName = DeepSearchTable(euiTbl, searchNames, 0)
+                end
+            end
+        end
+
+        if mID and lvl then
+            KR:SaveMemberKey(name, mID, lvl, "EllesmereUI", dName)
+        end
+    end)
+    if KR.groupMembers[name] and KR.groupMembers[name].source == "EllesmereUI" then
+        return KR.groupMembers[name]
     end
 
     -- 3. Check LibOpenRaid
@@ -559,30 +643,22 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         end
     end
 
-    -- 10. Deep Global Recursive Searcher (ONLY executed during explicit /kr resync or /kr debug)
-    if allowDeepSearch then
-        if _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup then
-            pcall(function()
-                local eui = _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup
-                local mID, lvl = DeepSearchTable(eui, searchNames, 0)
-                if mID and lvl then
-                    KR:SaveMemberKey(name, mID, lvl, "EllesmereUI")
-                end
-            end)
-            if KR.groupMembers[name] and KR.groupMembers[name].source == "EllesmereUI" then return KR.groupMembers[name] end
-        end
-
-        for gName, gVal in pairs(_G) do
-            if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("Keystone")) and type(gVal) == "table" and gName ~= "RaiderIO" then
-                pcall(function()
-                    local mID, lvl = DeepSearchTable(gVal, searchNames, 0)
-                    if mID and lvl then
-                        KR:SaveMemberKey(name, mID, lvl, gName)
+    -- 11. Deep Global Recursive Searcher (Only run when explicitly resyncing or UI is active)
+    if allowDeepSearch or (KR.UIFrame and KR.UIFrame:IsShown()) then
+        pcall(function()
+            for gName, gVal in pairs(_G) do
+                if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("Keystone") or gName:find("Key")) and type(gVal) == "table" and gName ~= "RaiderIO" and gName ~= "_G" and gName ~= "KR" and gName ~= "KeyRoulette" and gName ~= "UIParent" and gName ~= "WorldFrame" then
+                    local mID, lvl, dName = CheckTableForMemberKey(gVal, searchNames)
+                    if not mID then
+                        mID, lvl, dName = DeepSearchTable(gVal, searchNames, 0)
                     end
-                end)
-                if KR.groupMembers[name] then return KR.groupMembers[name] end
+                    if mID and lvl then
+                        KR:SaveMemberKey(name, mID, lvl, gName, dName)
+                        break
+                    end
+                end
             end
-        end
+        end)
     end
 
     local finalKey = KR.groupMembers[name] or KR.groupMembers[shortName]
@@ -845,13 +921,15 @@ function KR:ScanPlayerKeystone()
     return KR.playerKey
 end
 
--- Scan Guild Roster Notes for Keystone Info
+-- Scan Guild Roster Notes for Keystone Info (Rate-limited to once per 60s to prevent event loops)
+local lastGuildScanTime = 0
 function KR:ScanGuildRosterKeys()
     if not IsInGuild() then return end
+    local now = GetTime()
+    if (now - lastGuildScanTime) < 60 then return end
+    lastGuildScanTime = now
+
     pcall(function()
-        if C_GuildInfo and C_GuildInfo.GuildRoster then
-            C_GuildInfo.GuildRoster()
-        end
         local numTotal = GetNumGuildMembers() or 0
         for i = 1, numTotal do
             local name, rank, rankIndex, level, class, zone, note, officerNote = GetGuildRosterInfo(i)
@@ -933,9 +1011,16 @@ local function SafeSendAddonMsg(prefix, text, targetChan)
     end
 end
 
--- Broadcast Self Keystone to Party & Guild
-function KR:BroadcastKeystone()
+-- Check if UI window is currently open
+function KR:IsWindowVisible()
+    return KR.UIFrame and KR.UIFrame:IsShown()
+end
+
+-- Broadcast Self Keystone to Party & Guild (Only when window is open or force requested)
+function KR:BroadcastKeystone(force)
     if InCombatLockdown() or KR.inCombat then return end
+    if not force and not KR:IsWindowVisible() then return end
+
     local key = KR:ScanPlayerKeystone()
     if not key then return end
 
@@ -956,9 +1041,10 @@ function KR:BroadcastKeystone()
     end
 end
 
--- Request Group & Guild Keystones
-function KR:RequestGroupKeystones()
+-- Request Group & Guild Keystones (Only when window is open or force requested)
+function KR:RequestGroupKeystones(force)
     if InCombatLockdown() or KR.inCombat then return end
+    if not force and not KR:IsWindowVisible() then return end
 
     local channels = {}
     if IsInGroup() then
@@ -1000,10 +1086,10 @@ function KR:AskPartyForKeys()
     end
     local msg = "[Key Roulette]: Please link your Mythic+ keystone in chat!"
     SendChatMessage(msg, IsInRaid() and "RAID" or "PARTY")
-    KR:RequestGroupKeystones()
+    KR:RequestGroupKeystones(true)
 end
 
--- Manual Resync All Keys Action
+-- Manual Resync All Keys Action (Triggered by Sync button or /kr resync)
 function KR:ResyncAllKeys()
     if InCombatLockdown() or KR.inCombat then
         if DEFAULT_CHAT_FRAME then
@@ -1013,8 +1099,8 @@ function KR:ResyncAllKeys()
     end
     KR:ScanPlayerKeystone()
     if IsInGroup() or IsInGuild() then
-        KR:RequestGroupKeystones()
-        KR:BroadcastKeystone()
+        KR:RequestGroupKeystones(true)
+        KR:BroadcastKeystone(true)
     end
     KR:UpdateGroupRoster(true)
 
@@ -1028,6 +1114,27 @@ function KR:ResyncAllKeys()
         end
     end
     pcall(PlaySound, SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+end
+
+-- Throttled/Debounced Roster Update Scheduler to Prevent FPS Stutters
+local rosterUpdateTimer = nil
+function KR:ScheduleRosterUpdate(delay, force)
+    if InCombatLockdown() or KR.inCombat then
+        KR.pendingRosterUpdate = true
+        return
+    end
+    if not force and not KR:IsWindowVisible() then return end
+
+    delay = delay or 0.25
+    if rosterUpdateTimer then return end
+    rosterUpdateTimer = C_Timer.NewTimer(delay, function()
+        rosterUpdateTimer = nil
+        if not InCombatLockdown() and not KR.inCombat and (force or KR:IsWindowVisible()) then
+            KR:UpdateGroupRoster(force)
+        else
+            KR.pendingRosterUpdate = true
+        end
+    end)
 end
 
 -- Update Group Roster Data
@@ -1094,18 +1201,18 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
         if KR.pendingRosterUpdate then
             KR.pendingRosterUpdate = false
             C_Timer.After(0.5, function()
-                if not InCombatLockdown() then
+                if not InCombatLockdown() and KR:IsWindowVisible() then
                     KR:ScanPlayerKeystone()
-                    KR:UpdateGroupRoster()
+                    KR:ScheduleRosterUpdate(0.1, true)
                 end
             end)
         end
         return
     end
 
-    -- Strict Combat Protection Guard: Freeze all background calculations during dungeon fights!
+    -- Strict Combat Protection Guard: Freeze all calculations during fights!
     if InCombatLockdown() or KR.inCombat then
-        if event == "GROUP_ROSTER_UPDATE" or event == "BAG_UPDATE_DELAYED" then
+        if event == "GROUP_ROSTER_UPDATE" or event == "BAG_UPDATE_DELAYED" or event == "CHAT_MSG_ADDON" then
             KR.pendingRosterUpdate = true
         end
         return
@@ -1124,35 +1231,40 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
             RegisterAddonPrefixes()
             RegisterLibraryCallbacks()
             KR:ScanPlayerKeystone()
-            KR:UpdateGroupRoster()
         end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         RegisterAddonPrefixes()
         RegisterLibraryCallbacks()
-        KR:BroadcastKeystone()
-        KR:UpdateGroupRoster()
         if DEFAULT_CHAT_FRAME then
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r Addon Loaded! Type |cffffd700/kr|r or |cffffd700/keyroulette|r to open.")
         end
 
-    elseif event == "GROUP_ROSTER_UPDATE" or event == "GUILD_ROSTER_UPDATE" then
-        local now = GetTime()
-        if not KR.lastRosterUpdate or (now - KR.lastRosterUpdate) > 2 then
-            KR.lastRosterUpdate = now
+    elseif event == "GROUP_ROSTER_UPDATE" then
+        if KR:IsWindowVisible() then
+            local now = GetTime()
+            if not KR.lastRosterUpdate or (now - KR.lastRosterUpdate) > 3 then
+                KR.lastRosterUpdate = now
+                KR:BroadcastKeystone()
+                KR:RequestGroupKeystones()
+                KR:ScheduleRosterUpdate(0.3)
+            end
+        end
+
+    elseif event == "GUILD_ROSTER_UPDATE" then
+        if KR:IsWindowVisible() then
             KR:ScanGuildRosterKeys()
-            KR:BroadcastKeystone()
-            KR:RequestGroupKeystones()
-            KR:UpdateGroupRoster()
         end
 
     elseif event == "BAG_UPDATE_DELAYED" then
-        local now = GetTime()
-        if not KR.lastBagScan or (now - KR.lastBagScan) > 5 then
-            KR.lastBagScan = now
-            KR:ScanPlayerKeystone()
-            KR:BroadcastKeystone()
-            KR:UpdateGroupRoster()
+        if KR:IsWindowVisible() then
+            local now = GetTime()
+            if not KR.lastBagScan or (now - KR.lastBagScan) > 5 then
+                KR.lastBagScan = now
+                KR:ScanPlayerKeystone()
+                KR:BroadcastKeystone()
+                KR:ScheduleRosterUpdate(0.3)
+            end
         end
 
     elseif event:sub(1, 8) == "CHAT_MSG" and event ~= "CHAT_MSG_ADDON" then
@@ -1165,7 +1277,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                 mapID = tonumber(mapID)
                 level = tonumber(level)
                 KR:SaveMemberKey(senderName, mapID, level, "Chat Link")
-                KR:UpdateGroupRoster()
+                if KR:IsWindowVisible() then KR:ScheduleRosterUpdate(0.2) end
             else
                 local lvl, dName = text:match("%+(%d+)%s+([^%]+)]?")
                 if not lvl then dName, lvl = text:match("([^%+%[b]+)%s*%+(%d+)") end
@@ -1176,7 +1288,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                         if KR.groupMembers[senderName] then
                             KR.groupMembers[senderName].dungeonName = dName:gsub("^%s*(.-)%s*$", "%1")
                         end
-                        KR:UpdateGroupRoster()
+                        if KR:IsWindowVisible() then KR:ScheduleRosterUpdate(0.2) end
                     end
                 end
             end
@@ -1187,10 +1299,10 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
         if not sender or not message then return end
         local senderName = (Ambiguate and Ambiguate(sender, "none")) or sender:match("([^-]+)") or sender
 
-        -- Handle network ping / sync requests
+        -- Handle network ping / sync requests (only reply if window is open)
         if message == "PING" or message == "REQUEST" or message == "REQ" or message == "QUERY" or message == "REQUEST_KEY" or message == "REQ_KEY" then
-            if message == "PING" or message == "REQUEST" or message == "REQ" or message == "REQUEST_KEY" then
-                KR:BroadcastKeystone()
+            if (message == "PING" or message == "REQUEST" or message == "REQ" or message == "REQUEST_KEY") and KR:IsWindowVisible() then
+                KR:BroadcastKeystone(true)
             end
             return
         end
@@ -1199,7 +1311,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
         local mID, lvl, dName = ExtractMapAndLevel(message)
         if mID and lvl then
             KR:SaveMemberKey(senderName, mID, lvl, prefix, dName)
-            KR:UpdateGroupRoster()
+            if KR:IsWindowVisible() then KR:ScheduleRosterUpdate(0.2) end
         end
     end
 end)
@@ -1247,8 +1359,11 @@ function KR:ToggleUI()
         if KR.UIFrame:IsShown() then
             KR.UIFrame:Hide()
         else
-            KR:UpdateGroupRoster()
             KR.UIFrame:Show()
+            KR:ScanPlayerKeystone()
+            KR:RequestGroupKeystones(true)
+            KR:BroadcastKeystone(true)
+            KR:UpdateGroupRoster(true)
         end
     else
         DEFAULT_CHAT_FRAME:AddMessage("|cff00ffcc[Key Roulette]|r Could not initialize UI frame.")
