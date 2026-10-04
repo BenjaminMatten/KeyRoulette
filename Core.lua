@@ -369,16 +369,19 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
     if KR.manualKeys[shortName] then return KR.manualKeys[shortName] end
     if KR.manualKeys[fullName] then return KR.manualKeys[fullName] end
 
-    -- 2. Check EllesmereUI / EUIKeysPopup / EllesmereUIDB
+    -- 2. Check EllesmereUI / EUIKeysPopup / EllesmereUIDB / EUIKeys
     if _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys or _G.EUI_Keys then
         pcall(function()
-            local eui = _G.EllesmereUIDB or _G.EllesmereUI or _G.EUIKeysPopup or _G.EUIKeys or _G.EUI_Keys
-            local mID, lvl, dName
-            if _G.EllesmereUIDB and type(_G.EllesmereUIDB.keystonePopup) == "table" then
-                mID, lvl, dName = CheckTableForMemberKey(_G.EllesmereUIDB.keystonePopup, searchNames)
+            local euiDB = _G.EllesmereUIDB or _G.EUIKeysPopup or _G.EUIKeys or _G.EUI_Keys
+            local mID, lvl, dName = CheckTableForMemberKey(euiDB, searchNames)
+            if not mID and _G.EllesmereUI then
+                mID, lvl, dName = CheckTableForMemberKey(_G.EllesmereUI, searchNames)
             end
-            if not mID and type(eui) == "table" then
-                mID, lvl, dName = CheckTableForMemberKey(eui, searchNames)
+            if not mID and _G.EllesmereUIDB then
+                mID, lvl, dName = DeepSearchTable(_G.EllesmereUIDB, searchNames, 0)
+            end
+            if not mID and _G.EllesmereUI then
+                mID, lvl, dName = DeepSearchTable(_G.EllesmereUI, searchNames, 0)
             end
             if mID and lvl then
                 KR:SaveMemberKey(name, mID, lvl, "EllesmereUI", dName)
@@ -638,25 +641,31 @@ function KR:RunDebug()
     if _G.EllesmereUIDB then
         AddLog("=== EllesmereUIDB Table Dump ===")
         pcall(function()
-            if _G.EllesmereUIDB.keystonePopup and type(_G.EllesmereUIDB.keystonePopup) == "table" then
-                AddLog("  [EllesmereUIDB.keystonePopup Contents]:")
-                for k, v in pairs(_G.EllesmereUIDB.keystonePopup) do
-                    AddLog("    keystonePopup[" .. tostring(k) .. "] = " .. tostring(v))
-                    if type(v) == "table" then
-                        for k2, v2 in pairs(v) do
-                            AddLog("      [" .. tostring(k2) .. "] = " .. tostring(v2))
-                            if type(v2) == "table" then
-                                for k3, v3 in pairs(v2) do
-                                    AddLog("        [" .. tostring(k3) .. "] = " .. tostring(v3))
-                                end
+            for k, v in pairs(_G.EllesmereUIDB) do
+                AddLog("  EllesmereUIDB." .. tostring(k) .. " = " .. tostring(v))
+                if type(v) == "table" then
+                    for k2, v2 in pairs(v) do
+                        AddLog("    [" .. tostring(k2) .. "] = " .. tostring(v2))
+                        if type(v2) == "table" then
+                            for k3, v3 in pairs(v2) do
+                                AddLog("      [" .. tostring(k3) .. "] = " .. tostring(v3))
                             end
                         end
                     end
                 end
-            else
-                for k, v in pairs(_G.EllesmereUIDB) do
-                    if type(k) == "string" and (k:lower():find("key") or k:lower():find("party") or k:lower():find("roster")) then
-                        AddLog("  EllesmereUIDB." .. tostring(k) .. " = " .. tostring(v))
+            end
+        end)
+    end
+    if _G.EllesmereUI then
+        AddLog("=== EllesmereUI Table Dump ===")
+        pcall(function()
+            for k, v in pairs(_G.EllesmereUI) do
+                if type(k) == "string" and (k:lower():find("key") or k:lower():find("popup") or k:lower():find("party") or k:lower():find("roster")) then
+                    AddLog("  EllesmereUI." .. tostring(k) .. " = " .. tostring(v))
+                    if type(v) == "table" then
+                        for k2, v2 in pairs(v) do
+                            AddLog("    [" .. tostring(k2) .. "] = " .. tostring(v2))
+                        end
                     end
                 end
             end
