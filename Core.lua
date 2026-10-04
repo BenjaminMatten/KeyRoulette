@@ -156,6 +156,28 @@ function KR:SaveMemberKey(rawName, mapID, level, source, customDungeonName)
     KR.groupMembers[rawName:lower()] = keyData
     KR.groupMembers[shortName:lower()] = keyData
 
+    -- Embedded Library Sync Caches
+    pcall(function()
+        local lks = LibStub and LibStub("LibKeystone-1.0", true)
+        if lks and lks.keystones then
+            lks.keystones[rawName] = keyData
+            lks.keystones[shortName] = keyData
+            lks.keystones[fullName] = keyData
+        end
+        local lok = LibStub and LibStub("LibOpenKeystone-1.0", true)
+        if lok and lok.keystones then
+            lok.keystones[rawName] = keyData
+            lok.keystones[shortName] = keyData
+            lok.keystones[fullName] = keyData
+        end
+        local lor = LibStub and LibStub("LibOpenRaid-1.0", true)
+        if lor and lor.keystones then
+            lor.keystones[rawName] = keyData
+            lor.keystones[shortName] = keyData
+            lor.keystones[fullName] = keyData
+        end
+    end)
+
     -- Persistent SavedVariables cache
     KeyRouletteDB = KeyRouletteDB or {}
     KeyRouletteDB.groupKeys = KeyRouletteDB.groupKeys or {}

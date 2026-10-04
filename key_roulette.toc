@@ -5,6 +5,7 @@
 ## Version: 1.0.0
 ## SavedVariables: KeyRouletteDB
 
+Libs.lua
 Localization.lua
 Core.lua
 UI.lua
