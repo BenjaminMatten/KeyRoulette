@@ -136,7 +136,21 @@ function KR:GetDungeonInfo(mapID, dungeonName)
             local name, id, timeLimit, texture = C_ChallengeMode.GetMapUIInfo(mapID)
             if name and name ~= "" then
                 local info = { mapID = mapID, name = name, icon = texture or 5254320 }
-                KR.dungeonCache[mapID] = info
+                KR.seasonDungeonsByID[mapID] = info
+                return info
+            end
+        end
+        if C_Map and C_Map.GetMapInfo then
+            local mapInfo = C_Map.GetMapInfo(mapID)
+            if mapInfo and mapInfo.name and mapInfo.name ~= "" then
+                local info = { mapID = mapID, name = mapInfo.name, icon = 5254320 }
+                return info
+            end
+        end
+        if GetRealZoneText then
+            local zName = GetRealZoneText(mapID)
+            if zName and zName ~= "" then
+                local info = { mapID = mapID, name = zName, icon = 5254320 }
                 return info
             end
         end
@@ -153,7 +167,16 @@ function KR:GetDungeonInfo(mapID, dungeonName)
                 return info
             end
         end
-        return { mapID = 0, name = dungeonName, icon = 5254320 }
+        local cleanKey = key:gsub("^the%s+", "")
+        if KR.seasonDungeonsByName[cleanKey] then
+            return KR.seasonDungeonsByName[cleanKey]
+        end
+        for sName, info in pairs(KR.seasonDungeonsByName) do
+            if sName:find(cleanKey, 1, true) or cleanKey:find(sName, 1, true) then
+                return info
+            end
+        end
+        return { mapID = mapID or 0, name = dungeonName, icon = 5254320 }
     end
 
     if type(mapID) == "number" and mapID > 0 then
@@ -237,22 +260,29 @@ local function ExtractMapAndLevel(res1, res2)
     end
 
     -- Table res1
-    if not lvl and type(res1) == "table" then
+    if type(res1) == "table" then
         local sub = res1.key or res1.keystone or res1.keyData or res1.info or res1
         if type(sub) == "table" then
-            local rawMap = sub.mapID or sub.challengeMapID or sub.dungeonID or sub.dungeon_id or sub.map_id or sub.keyID or sub.map or sub.keystoneMapID or sub.mID or sub[1]
-            local rawLvl = sub.level or sub.keyLevel or sub.key_level or sub.levelNumber or sub.keystoneLevel or sub.keyLvl or sub.lvl or sub[2]
+            local rawMap = sub.mapID or sub.mapId or sub.challengeMapID or sub.challengeMapId or sub.dungeonID or sub.dungeonId or sub.dungeon_id or sub.map_id or sub.keyID or sub.keyId or sub.map or sub.keystoneMapID or sub.keystoneMapId or sub.mID or sub.mId or sub.zoneID or sub.zoneId or sub[1]
+            local rawLvl = sub.level or sub.keyLevel or sub.key_level or sub.levelNumber or sub.keystoneLevel or sub.keyLvl or sub.lvl or sub.levelNum or sub[2]
             if type(rawLvl) == "number" then lvl = rawLvl end
             if type(rawMap) == "number" then mID = rawMap end
-            if not dName then dName = sub.dungeonName or sub.dungeon or sub.name or sub.zone end
+            if not dName then dName = sub.dungeonName or sub.dungeon_name or sub.dungeon or sub.name or sub.zone or sub.mapName or sub.map_name or sub.title end
         end
 
         if not lvl and type(res1.level) == "number" then lvl = res1.level end
         if not lvl and type(res1.keyLevel) == "number" then lvl = res1.keyLevel end
+        if not lvl and type(res1.key_level) == "number" then lvl = res1.key_level end
         if not lvl and type(res1.key) == "number" then lvl = res1.key end
+
         if not mID and type(res1.mapID) == "number" then mID = res1.mapID end
+        if not mID and type(res1.mapId) == "number" then mID = res1.mapId end
         if not mID and type(res1.map) == "number" then mID = res1.map end
-        if not dName then dName = res1.dungeonName or res1.dungeon or res1.name or res1.zone end
+        if not mID and type(res1.dungeonID) == "number" then mID = res1.dungeonID end
+        if not mID and type(res1.dungeonId) == "number" then mID = res1.dungeonId end
+        if not mID and type(res1.challengeMapID) == "number" then mID = res1.challengeMapID end
+
+        if not dName then dName = res1.dungeonName or res1.dungeon_name or res1.dungeon or res1.name or res1.zone or res1.mapName or res1.map_name or res1.title end
     end
 
     -- String res1
@@ -305,7 +335,7 @@ local function CheckTableForMemberKey(tbl, searchNames)
             local entry = tbl[sName] or tbl[sName:lower()]
             if entry then
                 local mID, lvl, dName = ExtractMapAndLevel(entry)
-                if mID and lvl then return mID, lvl, dName end
+                if lvl and lvl > 0 then return mID, lvl, dName end
             end
         end
     end
@@ -319,7 +349,7 @@ local function CheckTableForMemberKey(tbl, searchNames)
                     local entry = sub[sName] or sub[sName:lower()]
                     if entry then
                         local mID, lvl, dName = ExtractMapAndLevel(entry)
-                        if mID and lvl then return mID, lvl, dName end
+                        if lvl and lvl > 0 then return mID, lvl, dName end
                     end
                 end
             end
@@ -335,7 +365,7 @@ local function CheckTableForMemberKey(tbl, searchNames)
                 for _, sName in ipairs(searchNames) do
                     if sName and (sender == sName or sender:lower() == sName:lower() or sShort == sName or sShort:lower() == sName:lower()) then
                         local mID, lvl, dName = ExtractMapAndLevel(v)
-                        if mID and lvl then return mID, lvl, dName end
+                        if lvl and lvl > 0 then return mID, lvl, dName end
                     end
                 end
             end
@@ -355,14 +385,14 @@ local function DeepSearchTable(tbl, searchNames, depth)
             for _, sName in ipairs(searchNames) do
                 if sName and sName ~= "" and (key == sName or key:lower() == sName:lower() or key:find(sName, 1, true)) then
                     local mID, lvl, dName = ExtractMapAndLevel(val)
-                    if mID and lvl then return mID, lvl, dName end
+                    if lvl and lvl > 0 then return mID, lvl, dName end
                 end
             end
         end
 
         if type(val) == "table" and key ~= "_G" and key ~= "KR" and key ~= "KeyRoulette" and key ~= "UIParent" and key ~= "WorldFrame" then
             local mID, lvl, dName = DeepSearchTable(val, searchNames, depth)
-            if mID and lvl then return mID, lvl, dName end
+            if lvl and lvl > 0 then return mID, lvl, dName end
         end
     end
     return nil, nil, nil
@@ -378,30 +408,52 @@ local function ScanFrameForMemberKey(parentFrame, searchNames)
         local hasMemberName = false
         local foundMapID, foundLevel, foundDungeonName
 
+        local fontStrings = {}
         if f.GetRegions then
             local regions = { f:GetRegions() }
             for _, reg in ipairs(regions) do
                 if reg and reg.GetObjectType and reg:GetObjectType() == "FontString" then
                     local text = reg:GetText()
                     if text and type(text) == "string" and text ~= "" then
-                        for _, sName in ipairs(searchNames) do
-                            if sName and sName ~= "" then
-                                local sClean = sName:match("([^-]+)") or sName
-                                if text:find(sName, 1, true) or text:lower():find(sName:lower(), 1, true) or text:find(sClean, 1, true) or text:lower():find(sClean:lower(), 1, true) then
-                                    hasMemberName = true
-                                end
-                            end
-                        end
-                        local mID, lvl, dName = ExtractMapAndLevel(text)
-                        if mID and lvl then
-                            foundMapID, foundLevel, foundDungeonName = mID, lvl, dName
-                        end
+                        table.insert(fontStrings, text)
                     end
                 end
             end
         end
 
-        if hasMemberName and foundLevel then
+        for _, text in ipairs(fontStrings) do
+            for _, sName in ipairs(searchNames) do
+                if sName and sName ~= "" then
+                    local sClean = sName:match("([^-]+)") or sName
+                    if text:find(sName, 1, true) or text:lower():find(sName:lower(), 1, true)
+                       or text:find(sClean, 1, true) or text:lower():find(sClean:lower(), 1, true) then
+                        hasMemberName = true
+                    end
+                end
+            end
+
+            local mID, lvl, dName = ExtractMapAndLevel(text)
+            if lvl and lvl > 0 then
+                foundLevel = lvl
+                if mID and mID > 0 then foundMapID = mID end
+                if dName and dName ~= "" then foundDungeonName = dName end
+            end
+        end
+
+        if foundLevel and not foundDungeonName then
+            for _, text in ipairs(fontStrings) do
+                local dInfo = KR:GetDungeonInfo(nil, text)
+                if dInfo and dInfo.name and dInfo.name ~= "Unknown Key" then
+                    foundDungeonName = dInfo.name
+                    if dInfo.mapID and dInfo.mapID > 0 then
+                        foundMapID = dInfo.mapID
+                    end
+                    break
+                end
+            end
+        end
+
+        if hasMemberName and foundLevel and (foundDungeonName or (foundMapID and foundMapID > 0)) then
             return foundMapID or 0, foundLevel, foundDungeonName
         end
 
@@ -413,30 +465,8 @@ local function ScanFrameForMemberKey(parentFrame, searchNames)
             end
         end
 
-        if hasMemberName and not foundLevel and f.GetChildren then
-            local function FindKeyInDescendants(cf, d)
-                if not cf or d > 4 then return nil, nil, nil end
-                if cf.GetRegions then
-                    for _, reg in ipairs({ cf:GetRegions() }) do
-                        if reg and reg.GetObjectType and reg:GetObjectType() == "FontString" then
-                            local txt = reg:GetText()
-                            if txt and type(txt) == "string" then
-                                local mID, lvl, dName = ExtractMapAndLevel(txt)
-                                if mID and lvl then return mID, lvl, dName end
-                            end
-                        end
-                    end
-                end
-                if cf.GetChildren then
-                    for _, child in ipairs({ cf:GetChildren() }) do
-                        local mID, lvl, dName = FindKeyInDescendants(child, d + 1)
-                        if mID and lvl then return mID, lvl, dName end
-                    end
-                end
-                return nil, nil, nil
-            end
-            local mID, lvl, dName = FindKeyInDescendants(f, 0)
-            if mID and lvl then return mID, lvl, dName end
+        if hasMemberName and foundLevel then
+            return foundMapID or 0, foundLevel, foundDungeonName
         end
 
         return nil, nil, nil
@@ -511,12 +541,13 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
             end
         end
 
-        if mID and lvl then
+        if lvl and lvl > 0 then
             KR:SaveMemberKey(name, mID, lvl, "EllesmereUI", dName)
         end
     end)
-    if KR.groupMembers[name] and KR.groupMembers[name].source == "EllesmereUI" then
-        return KR.groupMembers[name]
+    local euiKey = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+    if euiKey and euiKey.source == "EllesmereUI" and euiKey.dungeonName and euiKey.dungeonName ~= "Unknown Key" then
+        return euiKey
     end
 
     -- 3. Check LibOpenRaid
@@ -546,12 +577,13 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
             end
 
             local mID, lvl, dName = ExtractMapAndLevel(r1, r2)
-            if mID and lvl then
+            if lvl and lvl > 0 then
                 KR:SaveMemberKey(name, mID, lvl, "LibOpenRaid", dName)
             end
         end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source == "LibOpenRaid" then
-            return KR.groupMembers[name]
+        local lorKey = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+        if lorKey and lorKey.source == "LibOpenRaid" and lorKey.dungeonName and lorKey.dungeonName ~= "Unknown Key" then
+            return lorKey
         end
     end
 
@@ -560,12 +592,13 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         pcall(function()
             local kl = _G.KeystoneLootCharDB or _G.KeystoneLootDB or _G.KeystoneLootAPI
             local mID, lvl, dName = CheckTableForMemberKey(kl, searchNames)
-            if mID and lvl then
+            if lvl and lvl > 0 then
                 KR:SaveMemberKey(name, mID, lvl, "KeystoneLoot", dName)
             end
         end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source == "KeystoneLoot" then
-            return KR.groupMembers[name]
+        local klKey = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+        if klKey and klKey.source == "KeystoneLoot" and klKey.dungeonName and klKey.dungeonName ~= "Unknown Key" then
+            return klKey
         end
     end
 
@@ -581,12 +614,13 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
             if not r1 and tomo.keystones then r1 = tomo.keystones[fullName] or tomo.keystones[shortName] or tomo.keystones[unit] end
 
             local mID, lvl, dName = ExtractMapAndLevel(r1, r2)
-            if mID and lvl then
+            if lvl and lvl > 0 then
                 KR:SaveMemberKey(name, mID, lvl, "LibTomoKeystoneSync", dName)
             end
         end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source == "LibTomoKeystoneSync" then
-            return KR.groupMembers[name]
+        local tomoKey = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+        if tomoKey and tomoKey.source == "LibTomoKeystoneSync" and tomoKey.dungeonName and tomoKey.dungeonName ~= "Unknown Key" then
+            return tomoKey
         end
     end
 
@@ -599,12 +633,13 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
             if not r1 and lok.keystones then r1 = lok.keystones[fullName] or lok.keystones[shortName] end
 
             local mID, lvl, dName = ExtractMapAndLevel(r1, r2)
-            if mID and lvl then
+            if lvl and lvl > 0 then
                 KR:SaveMemberKey(name, mID, lvl, "LibOpenKeystone", dName)
             end
         end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source == "LibOpenKeystone" then
-            return KR.groupMembers[name]
+        local lokKey = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+        if lokKey and lokKey.source == "LibOpenKeystone" and lokKey.dungeonName and lokKey.dungeonName ~= "Unknown Key" then
+            return lokKey
         end
     end
 
@@ -613,12 +648,13 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         pcall(function()
             local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
             local mID, lvl, dName = ExtractMapAndLevel(dKey)
-            if mID and lvl then
+            if lvl and lvl > 0 then
                 KR:SaveMemberKey(name, mID, lvl, "Details", dName)
             end
         end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source == "Details" then
-            return KR.groupMembers[name]
+        local detKey = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+        if detKey and detKey.source == "Details" and detKey.dungeonName and detKey.dungeonName ~= "Unknown Key" then
+            return detKey
         end
     end
 
@@ -629,12 +665,13 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
             if not aKey and type(_G.AstralKeys) == "table" then aKey = _G.AstralKeys[shortName] or _G.AstralKeys[fullName] end
 
             local mID, lvl, dName = ExtractMapAndLevel(aKey)
-            if mID and lvl then
+            if lvl and lvl > 0 then
                 KR:SaveMemberKey(name, mID, lvl, "AstralKeys", dName)
             end
         end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source == "AstralKeys" then
-            return KR.groupMembers[name]
+        local akKey = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+        if akKey and akKey.source == "AstralKeys" and akKey.dungeonName and akKey.dungeonName ~= "Unknown Key" then
+            return akKey
         end
     end
 
