@@ -103,45 +103,80 @@ function KR:GetUnitClassColor(unit)
     return 0.8, 0.8, 0.8, "ffcccccc", "PRIEST"
 end
 
--- Dungeon Info Cache
-function KR:GetDungeonInfo(mapID)
-    if not mapID or mapID == 0 then return nil end
-    if KR.dungeonCache[mapID] then
-        return KR.dungeonCache[mapID]
+-- Dynamic Season Dungeon Map Lookup & Cache
+KR.seasonDungeonsByName = KR.seasonDungeonsByName or {}
+KR.seasonDungeonsByID = KR.seasonDungeonsByID or {}
+
+function KR:UpdateSeasonDungeons()
+    if not C_ChallengeMode or not C_ChallengeMode.GetMapTable then return end
+    local mapIDs = C_ChallengeMode.GetMapTable()
+    if not mapIDs then return end
+
+    for _, mID in ipairs(mapIDs) do
+        local name, id, timeLimit, texture = C_ChallengeMode.GetMapUIInfo(mID)
+        if name and name ~= "" then
+            local info = { mapID = mID, name = name, icon = texture or 5254320 }
+            KR.seasonDungeonsByID[mID] = info
+            KR.seasonDungeonsByName[name:lower()] = info
+            local clean = name:gsub("^The%s+", ""):lower()
+            KR.seasonDungeonsByName[clean] = info
+        end
+    end
+end
+
+function KR:GetDungeonInfo(mapID, dungeonName)
+    KR:UpdateSeasonDungeons()
+
+    -- 1. Try lookup by mapID if valid positive number
+    if type(mapID) == "number" and mapID > 0 then
+        if KR.seasonDungeonsByID[mapID] then
+            return KR.seasonDungeonsByID[mapID]
+        end
+        if C_ChallengeMode and C_ChallengeMode.GetMapUIInfo then
+            local name, id, timeLimit, texture = C_ChallengeMode.GetMapUIInfo(mapID)
+            if name and name ~= "" then
+                local info = { mapID = mapID, name = name, icon = texture or 5254320 }
+                KR.dungeonCache[mapID] = info
+                return info
+            end
+        end
     end
 
-    local name, id, timeLimit, texture, backgroundTexture
-    if C_ChallengeMode and C_ChallengeMode.GetMapUIInfo then
-        name, id, timeLimit, texture, backgroundTexture = C_ChallengeMode.GetMapUIInfo(mapID)
+    -- 2. Try lookup by dungeonName text string
+    if type(dungeonName) == "string" and dungeonName ~= "" then
+        local key = dungeonName:gsub("^%s*(.-)%s*$", "%1"):lower()
+        if KR.seasonDungeonsByName[key] then
+            return KR.seasonDungeonsByName[key]
+        end
+        for sName, info in pairs(KR.seasonDungeonsByName) do
+            if sName:find(key, 1, true) or key:find(sName, 1, true) then
+                return info
+            end
+        end
+        return { mapID = 0, name = dungeonName, icon = 5254320 }
     end
 
-    if not name or name == "" then
-        name = "Unknown Key (" .. mapID .. ")"
-        texture = 5254320
+    if type(mapID) == "number" and mapID > 0 then
+        return { mapID = mapID, name = "Map " .. mapID, icon = 5254320 }
     end
 
-    local info = {
-        name = name,
-        icon = texture or 5254320,
-        mapID = mapID,
-    }
-    KR.dungeonCache[mapID] = info
-    return info
+    return { mapID = 0, name = "Unknown Key", icon = 5254320 }
 end
 
 -- Save Member Key with Name Normalization & SavedVariables Persistence
 function KR:SaveMemberKey(rawName, mapID, level, source, customDungeonName)
     if not rawName or not level or level <= 0 then return end
-    mapID = (mapID and mapID > 0) and mapID or 507
     local shortName = rawName:match("([^-]+)") or rawName
     local realm = GetNormalizedRealmName() or GetRealmName() or ""
     local fullName = rawName:find("-") and rawName or (shortName .. "-" .. realm)
 
-    local dungeon = KR:GetDungeonInfo(mapID)
-    local dName = customDungeonName or (dungeon and dungeon.name) or ("Map " .. mapID)
+    -- Dynamic season resolution: resolve dungeon info from mapID OR customDungeonName
+    local dungeon = KR:GetDungeonInfo(mapID, customDungeonName)
+    local resolvedMapID = (dungeon and dungeon.mapID and dungeon.mapID > 0) and dungeon.mapID or (type(mapID) == "number" and mapID > 0 and mapID or 0)
+    local dName = (customDungeonName and customDungeonName ~= "") and customDungeonName or (dungeon and dungeon.name) or (resolvedMapID > 0 and ("Map " .. resolvedMapID) or "Unknown Key")
 
     local keyData = {
-        mapID = mapID,
+        mapID = resolvedMapID,
         level = level,
         dungeonName = dName,
         icon = (dungeon and dungeon.icon) or 5254320,
@@ -255,8 +290,7 @@ local function ExtractMapAndLevel(res1, res2)
     end
 
     if lvl and lvl > 0 then
-        mID = (mID and mID > 0) and mID or 507
-        return mID, lvl, dName
+        return mID or 0, lvl, dName
     end
     return nil, nil, nil
 end
@@ -368,7 +402,7 @@ local function ScanFrameForMemberKey(parentFrame, searchNames)
         end
 
         if hasMemberName and foundLevel then
-            return foundMapID or 507, foundLevel, foundDungeonName
+            return foundMapID or 0, foundLevel, foundDungeonName
         end
 
         if f.GetChildren then
@@ -431,12 +465,21 @@ end
 
 -- Comprehensive Keystone Lookup Engine (Live Addon Sync First)
 function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
+    if not name and unit and UnitExists(unit) then
+        name = GetUnitName(unit, true) or UnitName(unit)
+    end
     if not name then return nil end
-    local shortName = name:match("([^-]+)") or name
-    local realm = GetNormalizedRealmName() or GetRealmName() or ""
+
+    local uName, uRealm = (unit and UnitExists(unit)) and UnitName(unit) or nil
+    local shortName = name:match("([^-]+)") or uName or name
+    local realm = (uRealm and uRealm ~= "") and uRealm or (GetNormalizedRealmName() or GetRealmName() or "")
     local fullName = name:find("-") and name or (shortName .. "-" .. realm)
-    local guid = UnitExists(unit) and UnitGUID(unit)
+    local guid = (unit and UnitExists(unit)) and UnitGUID(unit) or nil
+
     local searchNames = { fullName, shortName, name, guid }
+    if uName and uRealm and uRealm ~= "" then
+        table.insert(searchNames, uName .. "-" .. uRealm)
+    end
 
     -- Purge any legacy RaiderIO caches
     KR:PurgeRaiderIOData()
@@ -611,10 +654,7 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
                             if lvlText and dName then
                                 local l = tonumber(lvlText)
                                 if l and l > 0 then
-                                    KR:SaveMemberKey(name, 507, l, "Tooltip")
-                                    if KR.groupMembers[name] then
-                                        KR.groupMembers[name].dungeonName = dName:gsub("^%s*(.-)%s*$", "%1")
-                                    end
+                                    KR:SaveMemberKey(name, 0, l, "Tooltip", dName:gsub("^%s*(.-)%s*$", "%1"))
                                 end
                             end
                         end
@@ -698,23 +738,10 @@ function KR:RunDebug()
             table.insert(foundGlobals, gName)
         end
     end
-    -- Dump EUIKeysPopup and EllesmereUIDB
-    if _G.EUIKeysPopup then
-        AddLog("=== EUIKeysPopup Table Dump ===")
-        pcall(function()
-            for k, v in pairs(_G.EUIKeysPopup) do
-                if type(v) ~= "function" then
-                    AddLog("  EUIKeysPopup." .. tostring(k) .. " = " .. tostring(v))
-                    if type(v) == "table" then
-                        for k2, v2 in pairs(v) do
-                            AddLog("    EUIKeysPopup." .. tostring(k) .. "." .. tostring(k2) .. " = " .. tostring(v2))
-                        end
-                    end
-                end
-            end
-        end)
-    end
-    if _G.EllesmereUIDB then
+    AddLog("Globals Found: " .. table.concat(foundGlobals, ", "))
+
+    -- Dump EllesmereUIDB safely
+    if _G.EllesmereUIDB and type(_G.EllesmereUIDB) == "table" then
         AddLog("=== EllesmereUIDB Table Dump ===")
         pcall(function()
             for k, v in pairs(_G.EllesmereUIDB) do
@@ -722,26 +749,6 @@ function KR:RunDebug()
                 if type(v) == "table" then
                     for k2, v2 in pairs(v) do
                         AddLog("    [" .. tostring(k2) .. "] = " .. tostring(v2))
-                        if type(v2) == "table" then
-                            for k3, v3 in pairs(v2) do
-                                AddLog("      [" .. tostring(k3) .. "] = " .. tostring(v3))
-                            end
-                        end
-                    end
-                end
-            end
-        end)
-    end
-    if _G.EllesmereUI then
-        AddLog("=== EllesmereUI Table Dump ===")
-        pcall(function()
-            for k, v in pairs(_G.EllesmereUI) do
-                if type(k) == "string" and (k:lower():find("key") or k:lower():find("popup") or k:lower():find("party") or k:lower():find("roster")) then
-                    AddLog("  EllesmereUI." .. tostring(k) .. " = " .. tostring(v))
-                    if type(v) == "table" then
-                        for k2, v2 in pairs(v) do
-                            AddLog("    [" .. tostring(k2) .. "] = " .. tostring(v2))
-                        end
                     end
                 end
             end
@@ -751,13 +758,14 @@ function KR:RunDebug()
     -- Deep Member Inspection Trace
     if IsInGroup() then
         local num = GetNumGroupMembers()
-        for i = 1, (num - 1) do
-            local unit = "party" .. i
-            if UnitExists(unit) then
-                local name = UnitName(unit)
+        local prefix = IsInRaid() and "raid" or "party"
+        for i = 1, (IsInRaid() and num or (num - 1)) do
+            local unit = prefix .. i
+            if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+                local uName, uRealm = UnitName(unit)
+                local fullName = GetUnitName(unit, true) or (uRealm and uRealm ~= "" and (uName .. "-" .. uRealm)) or uName or "Unknown"
                 local guid = UnitGUID(unit)
-                local shortName = name:match("([^-]+)") or name
-                AddLog("--- Inspecting Party Member " .. i .. ": " .. tostring(name) .. " (GUID: " .. tostring(guid) .. ") ---")
+                AddLog("--- Party Member " .. i .. ": " .. tostring(fullName) .. " (GUID: " .. tostring(guid) .. ") ---")
 
                 -- LibOpenRaid check
                 local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
@@ -768,80 +776,12 @@ function KR:RunDebug()
                             if not m and guid then m, l = lor:GetKeystoneInfo(guid) end
                             if m and l then AddLog("  [LibOpenRaid:GetKeystoneInfo]: +" .. tostring(l) .. " (Map " .. tostring(m) .. ")") end
                         end
-                        if lor.allyData then
-                            local ally = lor.allyData[unit] or (guid and lor.allyData[guid]) or lor.allyData[shortName]
-                            if ally then AddLog("  [LibOpenRaid.allyData]: found ally record") end
-                        end
                     end)
                 end
 
-                -- RaiderIO check
-                if _G.RaiderIO and _G.RaiderIO.GetProfile then
-                    pcall(function()
-                        local prof = _G.RaiderIO.GetProfile(unit) or _G.RaiderIO.GetProfile(shortName) or _G.RaiderIO.GetProfile(name)
-                        if prof then
-                            AddLog("  [RaiderIO.GetProfile]: profile object found for " .. name)
-                            if type(prof) == "table" then
-                                for k, v in pairs(prof) do
-                                    if type(v) ~= "function" then
-                                        if type(v) == "table" then
-                                            AddLog("    prof." .. tostring(k) .. " (table):")
-                                            for k2, v2 in pairs(v) do
-                                                if type(v2) ~= "function" then
-                                                    AddLog("      prof." .. tostring(k) .. "." .. tostring(k2) .. " = " .. tostring(v2))
-                                                end
-                                            end
-                                        else
-                                            AddLog("    prof." .. tostring(k) .. " = " .. tostring(v))
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end)
-                end
-
-                -- KeystoneLoot check
-                if _G.KeystoneLootDB then
-                    pcall(function()
-                        AddLog("  [KeystoneLootDB dump for " .. name .. "]:")
-                        for k, v in pairs(_G.KeystoneLootDB) do
-                            if type(k) == "string" and (k:find(shortName) or k:find(name) or k == "characters" or k == "keys" or k == "keystones") then
-                                AddLog("    KeystoneLootDB[" .. tostring(k) .. "] = " .. tostring(v))
-                                if type(v) == "table" then
-                                    for k2, v2 in pairs(v) do
-                                        AddLog("      [" .. tostring(k2) .. "] = " .. tostring(v2))
-                                    end
-                                end
-                            end
-                        end
-                    end)
-                end
-            end
-        end
-    end
-
-    -- Dump cached keys
-    local count = 0
-    if KR.groupMembers then
-        for k, v in pairs(KR.groupMembers) do
-            count = count + 1
-            AddLog("Cached Key [" .. tostring(k) .. "]: " .. tostring(v.dungeonName) .. " +" .. tostring(v.level) .. " (" .. tostring(v.source) .. ")")
-        end
-    end
-    if count == 0 then
-        AddLog("No cached keys in memory.")
-    end
-
-    -- Dump Party Member 1-4
-    if IsInGroup() then
-        local num = GetNumGroupMembers()
-        for i = 1, (num - 1) do
-            local unit = "party" .. i
-            if UnitExists(unit) then
-                local name = UnitName(unit)
-                local key = KR:FindPartyMemberKey(unit, name)
-                AddLog("Party Member " .. i .. " (" .. tostring(name) .. "): " .. (key and ("+" .. key.level .. " " .. key.dungeonName .. " [" .. key.source .. "]") or "No Key Detected (Click 'Edit' to set)"))
+                -- Key Lookup Check
+                local key = KR:FindPartyMemberKey(unit, fullName, true)
+                AddLog("  Key Detection Result: " .. (key and ("+" .. key.level .. " " .. key.dungeonName .. " [" .. key.source .. "]") or "No Key Detected"))
             end
         end
     else
@@ -851,7 +791,7 @@ function KR:RunDebug()
 
     local reportText = table.concat(logLines, "\n")
 
-    -- Save to SavedVariables for file persistence
+    -- Save to SavedVariables for persistence
     KeyRouletteDB = KeyRouletteDB or {}
     KeyRouletteDB.latestDebugReport = reportText
     KeyRouletteDB.debugLog = logLines
@@ -950,10 +890,7 @@ function KR:ScanGuildRosterKeys()
                         if lvlText and dName then
                             local l = tonumber(lvlText)
                             if l and l > 0 then
-                                KR:SaveMemberKey(shortName, 507, l, "Guild Note")
-                                if KR.groupMembers[shortName] then
-                                    KR.groupMembers[shortName].dungeonName = dName:gsub("^%s*(.-)%s*$", "%1")
-                                end
+                                KR:SaveMemberKey(shortName, 0, l, "Guild Note", dName:gsub("^%s*(.-)%s*$", "%1"))
                             end
                         end
                     end
@@ -1284,10 +1221,7 @@ KR.frame:SetScript("OnEvent", function(self, event, ...)
                 if lvl and dName then
                     lvl = tonumber(lvl)
                     if lvl and lvl > 0 then
-                        KR:SaveMemberKey(senderName, 507, lvl, "Chat Text")
-                        if KR.groupMembers[senderName] then
-                            KR.groupMembers[senderName].dungeonName = dName:gsub("^%s*(.-)%s*$", "%1")
-                        end
+                        KR:SaveMemberKey(senderName, 0, lvl, "Chat Text", dName:gsub("^%s*(.-)%s*$", "%1"))
                         if KR:IsWindowVisible() then KR:ScheduleRosterUpdate(0.2) end
                     end
                 end
