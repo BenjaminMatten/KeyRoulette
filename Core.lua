@@ -176,14 +176,14 @@ function KR:GetDungeonInfo(mapID, dungeonName)
                 return info
             end
         end
-        return { mapID = mapID or 0, name = dungeonName, icon = 5254320 }
+        return { mapID = mapID or 0, name = dungeonName, icon = 5254320, isFallback = true }
     end
 
     if type(mapID) == "number" and mapID > 0 then
         return { mapID = mapID, name = "Map " .. mapID, icon = 5254320 }
     end
 
-    return { mapID = 0, name = "Unknown Key", icon = 5254320 }
+    return { mapID = 0, name = "Unknown Key", icon = 5254320, isFallback = true }
 end
 
 -- Save Member Key with Name Normalization & SavedVariables Persistence
@@ -193,10 +193,25 @@ function KR:SaveMemberKey(rawName, mapID, level, source, customDungeonName)
     local realm = GetNormalizedRealmName() or GetRealmName() or ""
     local fullName = rawName:find("-") and rawName or (shortName .. "-" .. realm)
 
+    -- Reject customDungeonName if it matches the player's own character name
+    if customDungeonName and (customDungeonName:lower() == rawName:lower() or customDungeonName:lower() == shortName:lower() or customDungeonName:lower() == fullName:lower()) then
+        customDungeonName = nil
+    end
+
     -- Dynamic season resolution: resolve dungeon info from mapID OR customDungeonName
     local dungeon = KR:GetDungeonInfo(mapID, customDungeonName)
     local resolvedMapID = (dungeon and dungeon.mapID and dungeon.mapID > 0) and dungeon.mapID or (type(mapID) == "number" and mapID > 0 and mapID or 0)
-    local dName = (customDungeonName and customDungeonName ~= "") and customDungeonName or (dungeon and dungeon.name) or (resolvedMapID > 0 and ("Map " .. resolvedMapID) or "Unknown Key")
+    
+    local dName
+    if dungeon and not dungeon.isFallback and dungeon.name and dungeon.name ~= "Unknown Key" then
+        dName = dungeon.name
+    elseif customDungeonName and customDungeonName ~= "" then
+        dName = customDungeonName
+    elseif resolvedMapID > 0 then
+        dName = "Map " .. resolvedMapID
+    else
+        dName = "Unknown Key"
+    end
 
     local keyData = {
         mapID = resolvedMapID,
@@ -314,7 +329,14 @@ local function ExtractMapAndLevel(res1, res2)
             if not lStr then dStr, lStr = res1:match("(.-)%s*%+(%d+)") end
             if lStr then
                 lvl = tonumber(lStr)
-                if dStr and dStr ~= "" then dName = dStr:gsub("^%s*(.-)%s*$", "%1") end
+                if dStr and dStr ~= "" then
+                    local cleanD = dStr:gsub("^%s*(.-)%s*$", "%1")
+                    local dInfo = KR:GetDungeonInfo(nil, cleanD)
+                    if dInfo and not dInfo.isFallback then
+                        if dInfo.mapID and dInfo.mapID > 0 then mID = dInfo.mapID end
+                        if dInfo.name then dName = dInfo.name end
+                    end
+                end
             end
         end
     end
@@ -442,13 +464,27 @@ local function ScanFrameForMemberKey(parentFrame, searchNames)
 
         if foundLevel and not foundDungeonName then
             for _, text in ipairs(fontStrings) do
-                local dInfo = KR:GetDungeonInfo(nil, text)
-                if dInfo and dInfo.name and dInfo.name ~= "Unknown Key" then
-                    foundDungeonName = dInfo.name
-                    if dInfo.mapID and dInfo.mapID > 0 then
-                        foundMapID = dInfo.mapID
+                local isPlayerName = false
+                for _, sName in ipairs(searchNames) do
+                    if sName and sName ~= "" then
+                        local sClean = sName:match("([^-]+)") or sName
+                        if text:find(sName, 1, true) or text:lower():find(sName:lower(), 1, true)
+                           or text:find(sClean, 1, true) or text:lower():find(sClean:lower(), 1, true) then
+                            isPlayerName = true
+                            break
+                        end
                     end
-                    break
+                end
+
+                if not isPlayerName then
+                    local dInfo = KR:GetDungeonInfo(nil, text)
+                    if dInfo and dInfo.name and dInfo.name ~= "Unknown Key" and not dInfo.isFallback then
+                        foundDungeonName = dInfo.name
+                        if dInfo.mapID and dInfo.mapID > 0 then
+                            foundMapID = dInfo.mapID
+                        end
+                        break
+                    end
                 end
             end
         end
@@ -506,6 +542,20 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
     local fullName = name:find("-") and name or (shortName .. "-" .. realm)
     local guid = (unit and UnitExists(unit)) and UnitGUID(unit) or nil
 
+    -- 1. Check manual user override (Edit button in UI)
+    if KR.manualKeys[name] then return KR.manualKeys[name] end
+    if KR.manualKeys[shortName] then return KR.manualKeys[shortName] end
+    if KR.manualKeys[fullName] then return KR.manualKeys[fullName] end
+
+    -- 2. Fast Memory Cache Check: Stop querying immediately if we already have a valid key for this character!
+    if not allowDeepSearch then
+        local existing = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+                      or KR.groupMembers[name:lower()] or KR.groupMembers[shortName:lower()]
+        if existing and existing.level and existing.level > 0 and existing.dungeonName and existing.dungeonName ~= "Unknown Key" and existing.source ~= "RaiderIO" then
+            return existing
+        end
+    end
+
     local searchNames = { fullName, shortName, name, guid }
     if uName and uRealm and uRealm ~= "" then
         table.insert(searchNames, uName .. "-" .. uRealm)
@@ -514,29 +564,23 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
     -- Purge any legacy RaiderIO caches
     KR:PurgeRaiderIOData()
 
-    -- 1. Check manual user override (Edit button in UI)
-    if KR.manualKeys[name] then return KR.manualKeys[name] end
-    if KR.manualKeys[shortName] then return KR.manualKeys[shortName] end
-    if KR.manualKeys[fullName] then return KR.manualKeys[fullName] end
-
-    -- 2. Check EllesmereUI / EUIKeysPopup / EllesmereUIDB / EUIKeys / EUI
+    -- 3. Check EllesmereUI / EUIKeysPopup / EllesmereUIDB / EUIKeys / EUI
     pcall(function()
         local mID, lvl, dName
-        -- A. Check UI frame text elements first (EllesmereUI key popup windows)
-        local euiFrames = { _G.EUIKeysPopup, _G.EUIKeys, _G.EUI_Keys, _G.EllesmereUIFrame }
-        for _, frame in ipairs(euiFrames) do
-            if not mID and frame then
-                mID, lvl, dName = ScanFrameForMemberKey(frame, searchNames)
+        -- A. Check EllesmereUI tables first (Fast O(1) indexing)
+        local euiTables = { _G.EllesmereUIDB, _G.EllesmereUI, _G.EUIKeysPopup, _G.EUIKeys, _G.EUI_Keys, _G.EUI }
+        for _, euiTbl in ipairs(euiTables) do
+            if not lvl and euiTbl and type(euiTbl) == "table" then
+                mID, lvl, dName = CheckTableForMemberKey(euiTbl, searchNames)
             end
         end
 
-        -- B. Check EllesmereUI tables
-        local euiTables = { _G.EllesmereUIDB, _G.EllesmereUI, _G.EUIKeysPopup, _G.EUIKeys, _G.EUI_Keys, _G.EUI }
-        for _, euiTbl in ipairs(euiTables) do
-            if not mID and euiTbl and type(euiTbl) == "table" then
-                mID, lvl, dName = CheckTableForMemberKey(euiTbl, searchNames)
-                if not mID then
-                    mID, lvl, dName = DeepSearchTable(euiTbl, searchNames, 0)
+        -- B. Check UI frame text elements ONLY if frame is visible
+        if not lvl then
+            local euiFrames = { _G.EUIKeysPopup, _G.EUIKeys, _G.EUI_Keys, _G.EllesmereUIFrame }
+            for _, frame in ipairs(euiFrames) do
+                if not lvl and frame and frame.IsShown and frame:IsShown() then
+                    mID, lvl, dName = ScanFrameForMemberKey(frame, searchNames)
                 end
             end
         end
@@ -550,7 +594,7 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         return euiKey
     end
 
-    -- 3. Check LibOpenRaid
+    -- 4. Check LibOpenRaid
     local lor = (LibStub and LibStub("LibOpenRaid-1.0", true)) or _G.LibOpenRaid
     if lor then
         pcall(function()
@@ -587,7 +631,7 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         end
     end
 
-    -- 4. Check KeystoneLoot
+    -- 5. Check KeystoneLoot
     if _G.KeystoneLootDB or _G.KeystoneLootAPI or _G.KeystoneLootCharDB then
         pcall(function()
             local kl = _G.KeystoneLootCharDB or _G.KeystoneLootDB or _G.KeystoneLootAPI
@@ -602,7 +646,7 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         end
     end
 
-    -- 5. Check LibTomoKeystoneSync
+    -- 6. Check LibTomoKeystoneSync
     local tomo = (LibStub and (LibStub("LibTomoKeystoneSync-1.0", true) or LibStub("LibTomoKeystoneSync", true)))
               or _G.LibTomoKeystoneSync or _G.TomoKeystoneSync or _G.TomoKeys
     if tomo then
@@ -624,7 +668,7 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         end
     end
 
-    -- 6. Check LibOpenKeystone
+    -- 7. Check LibOpenKeystone
     local lok = (LibStub and (LibStub("LibOpenKeystone-1.0", true) or LibStub("LibOpenKeystone", true))) or _G.LibOpenKeystone
     if lok then
         pcall(function()
@@ -643,7 +687,7 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         end
     end
 
-    -- 7. Check Details & AstralKeys
+    -- 8. Check Details & AstralKeys
     if _G.Details and _G.Details.Keystones then
         pcall(function()
             local dKey = _G.Details.Keystones[fullName] or _G.Details.Keystones[shortName] or _G.Details.Keystones[name]
@@ -675,7 +719,7 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
         end
     end
 
-    -- 8. Tooltip Unit Scanner (For Standard UI players without sync addons)
+    -- 9. Tooltip Unit Scanner (For Standard UI players without sync addons)
     if C_TooltipInfo and C_TooltipInfo.GetUnit then
         pcall(function()
             local data = C_TooltipInfo.GetUnit(unit)
@@ -699,38 +743,33 @@ function KR:FindPartyMemberKey(unit, name, allowDeepSearch)
                 end
             end
         end)
-        if KR.groupMembers[name] and KR.groupMembers[name].source == "Tooltip" then
-            return KR.groupMembers[name]
+        local ttKey = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
+        if ttKey and ttKey.source == "Tooltip" and ttKey.dungeonName and ttKey.dungeonName ~= "Unknown Key" then
+            return ttKey
         end
     end
 
-    -- 9. Check in-memory sync cache (non-RaiderIO)
-    local cached = KR.groupMembers[name] or KR.groupMembers[shortName] or KR.groupMembers[fullName]
-                or KR.groupMembers[name:lower()] or KR.groupMembers[shortName:lower()]
-    if cached and cached.source ~= "RaiderIO" then
-        return cached
-    end
-
-    -- 10. Check persistent SavedVariables DB cache (non-RaiderIO)
+    -- 10. Check persistent SavedVariables DB cache
     if KeyRouletteDB and KeyRouletteDB.groupKeys then
         local saved = KeyRouletteDB.groupKeys[name] or KeyRouletteDB.groupKeys[shortName] or KeyRouletteDB.groupKeys[fullName]
-        if saved and saved.source ~= "RaiderIO" then
+        if saved and saved.source ~= "RaiderIO" and saved.level and saved.level > 0 and saved.dungeonName and saved.dungeonName ~= "Unknown Key" then
             KR.groupMembers[name] = saved
             return saved
         end
     end
 
-    -- 11. Deep Global Recursive Searcher (Only run when explicitly resyncing or UI is active)
-    if allowDeepSearch or (KR.UIFrame and KR.UIFrame:IsShown()) then
+    -- 11. Deep Search ONLY if allowDeepSearch is explicitly requested (e.g. clicking Sync button)
+    if allowDeepSearch then
         pcall(function()
-            for gName, gVal in pairs(_G) do
-                if type(gName) == "string" and (gName:find("Ellesmere") or gName:find("EUI") or gName:find("Tomo") or gName:find("Keystone") or gName:find("Key")) and type(gVal) == "table" and gName ~= "RaiderIO" and gName ~= "_G" and gName ~= "KR" and gName ~= "KeyRoulette" and gName ~= "UIParent" and gName ~= "WorldFrame" then
-                    local mID, lvl, dName = CheckTableForMemberKey(gVal, searchNames)
-                    if not mID then
-                        mID, lvl, dName = DeepSearchTable(gVal, searchNames, 0)
+            local targetedTables = { _G.EllesmereUIDB, _G.EllesmereUI, _G.KeystoneLootDB, _G.KeystoneLootCharDB, _G.Details, _G.AstralKeys }
+            for _, tbl in ipairs(targetedTables) do
+                if tbl and type(tbl) == "table" then
+                    local mID, lvl, dName = CheckTableForMemberKey(tbl, searchNames)
+                    if not lvl then
+                        mID, lvl, dName = DeepSearchTable(tbl, searchNames, 0)
                     end
-                    if mID and lvl then
-                        KR:SaveMemberKey(name, mID, lvl, gName, dName)
+                    if lvl and lvl > 0 then
+                        KR:SaveMemberKey(name, mID, lvl, "DeepSearch", dName)
                         break
                     end
                 end
